@@ -41,7 +41,7 @@ export async function runPayroll(tx, { userId, period, entityId }) {
   // 发薪的维度是 payroll_legal_entity，不是 cost_org ——
   // 选错维度会变成"在 A 店范围内的人都能算 B 法人的薪"，而两边都查得到数据。
   await requireOrg(tx, { userId, resource: RESOURCES.run, orgId: entityId, dim: 'payroll_legal_entity', action: 'write' });
-  await assertLegacyPayrollRegion(tx,entityId);
+  await assertLegacyPayrollRegion(tx,entityId,period);
 
   let run = (await tx.query(
     "SELECT id, status FROM pay_run WHERE period=$1 AND legal_entity_id=$2 AND kind='monthly' ORDER BY id LIMIT 1",
@@ -103,7 +103,7 @@ export async function runBonus(tx, { userId, year, entityId }) {
   if (!Number.isInteger(y) || y < 2000 || y > 2100) throw bizErr('E_ARG_INVALID', 'year 不合理');
   await requireOrg(tx, { userId, resource: RESOURCES.run, orgId: entityId,
     dim: 'payroll_legal_entity', action: 'write' });
-  await assertLegacyPayrollRegion(tx,entityId);
+  await assertLegacyPayrollRegion(tx,entityId,`${y}-12`);
 
   const period = `${y}-12`;
   let run = (await tx.query(

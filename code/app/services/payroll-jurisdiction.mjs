@@ -1,11 +1,13 @@
 import { bizErr } from '../errors.mjs';
 const bad=message=>{throw bizErr('E_TY_ARGUMENT',message);};
 export const JURISDICTION_MODULES=['BASE','HK_MPF','CN_IIT','CN_SOCIAL_INSURANCE'];
-export async function assertLegacyPayrollRegion(tx,entityId){
+export async function assertLegacyPayrollRegion(tx,entityId,period=null){
  const outside=(await tx.query(`SELECT EXISTS(SELECT 1 FROM ty_legacy_company_binding b
   CROSS JOIN LATERAL fn_ty_company_locale(b.company_id) loc WHERE b.payroll_legal_entity_id=$1
    AND loc.region_code IS NOT NULL AND loc.region_code<>'CN') blocked`,[entityId])).rows[0].blocked;
  if(outside)bad('此主体包含香港或其他非内地公司，请在“薪酬核算”选择对应地区规则，不能使用原内地算薪入口');
+ const supports=(await tx.query("SELECT to_regprocedure('public.fn_ty_legacy_service_unsafe(bigint,text)')IS NOT NULL ok")).rows[0].ok;
+ if(supports&&(await tx.query("SELECT fn_ty_legacy_service_unsafe($1,coalesce($2,to_char(app_today(),'YYYY-MM')))blocked",[entityId,period])).rows[0].blocked)bad('本期含外包服务或并行用工，请使用新版薪酬核算与外包账单，兼容直营算薪不支持这些关系');
 }
 export function regionCode(value,{nullable=true,generic=false}={}){
  if((value===null||value===undefined||value==='')&&nullable)return null;

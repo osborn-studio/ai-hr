@@ -10,13 +10,20 @@ const ATTENDANCE = new Set(['legacy-roster','legacy-attendance','legacy-attx','l
 export function canOpenRoute(route,capabilities={}) {
   const resources=capabilities.resources||{},profile=capabilities.profile_code;
   const read=code=>!!resources[code]?.can_read,write=code=>!!resources[code]?.can_write;
-  if(route==='home'||route==='legacy-roles')return true;
+  if(route==='home')return true;
+  if(route==='legacy-roles')return !['vendor_contact','outsource_hr'].includes(profile);
+  if(route==='my-outsource')return !!capabilities.has_outsource&&read('outsource_self');
+  if(route==='outsourcing-bills')return read('outsource_ops')&&read('outsource_bill');
+  if(route.startsWith('outsourcing-'))return read('outsource_ops');
+  if(profile==='outsourced_staff'&&['my-payroll','my-leave'].includes(route))return false;
+
   if(route==='my-attendance')return !!capabilities.has_person;
-  if(route.startsWith('time-'))return !['config_admin','store_staff','station_staff'].includes(profile)&&read('attendance_daily');
+  if(route.startsWith('time-'))return !['config_admin','store_staff','station_staff','outsourced_staff'].includes(profile)&&read('attendance_daily');
   if(PERSONAL.has(route))return !!capabilities.has_person&&read(route==='my-payroll'?'payslip':route==='my-leave'?'leave_request':'training_self');
-  if(['store_staff','station_staff'].includes(profile)&&!['organization','people','employments','assignments'].includes(route))return false;
+  if(['store_staff','station_staff','outsourced_staff'].includes(profile)&&!['organization','people','employments','assignments'].includes(route))return false;
   if(profile==='store_manager'&&['customer-performance','legacy-contract','legacy-exit','legacy-severance','legacy-settlement'].includes(route))return false;
   if(profile==='config_admin'&&['foundation-import','foundation-bridge'].includes(route))return false;
+  if(['group_hr_director','company_hr_director'].includes(profile)&&['legacy-ledger','legacy-policy','legacy-exceptions','legacy-health','legacy-mcp'].includes(route))return false;
   if(CONFIG.has(route))return write('ledger')&&(profile!=='boss');
   if(profile==='config_admin'&&!STRUCTURE.has(route))return false;
   if(STRUCTURE.has(route))return read('ledger')||read('people_read_all')||read('people_self')||read('employee_roster');

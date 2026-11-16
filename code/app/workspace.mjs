@@ -1,3 +1,4 @@
+import {renderOutsourcing} from './outsourcing-ui.mjs';
 import {renderPlanning} from './organization-planning.mjs';
 import {renderTime} from './advanced-time-ui.mjs';
 import {inContext,within} from './scope-tree.mjs';
@@ -48,7 +49,7 @@ const configs = {
   jobs:{label:'标准岗位',section:GROUP,collection:'jobs',endpoint:'jobs',description:'集团统一的岗位目录，例如厨师、服务员、店长，与部门和系统权限角色分别管理。',fields:()=>[groupField(),...codeName(),field('job_family','岗位序列','text',{placeholder:'如：厨房、服务、管理'})],columns:[nameCol(),col('岗位序列',r=>text(r.job_family)),col('集团',r=>ref('groups',r.group_id)),statusCol()]},
   grades:{label:'职级',section:GROUP,collection:'grades',endpoint:'grades',description:'职级描述任职等级，独立于标准岗位和部门。',fields:()=>[groupField(),...codeName(),field('level','排序等级','number',{min:0,help:'用于职级排序，可留空'})],columns:[nameCol(),col('排序等级',r=>text(r.level)),col('集团',r=>ref('groups',r.group_id)),statusCol()]},
   positions:{label:'公司岗位设置',section:GROUP,collection:'positions',endpoint:'positions',description:'把标准岗位设置到具体公司的部门，作为员工任职的组织位置。',fields:()=>[groupField(),companyField(),field('department_id','所属部门','select',{source:'departments',required:true}),field('job_id','标准岗位','select',{source:'jobs',required:true}),field('parent_position_id','承接上级岗位','select',{source:'positions'}),field('grade_id','参考职级','select',{source:'grades'}),...codeName()],columns:[nameCol(),companyCol(),col('部门',r=>ref('departments',r.department_id)),col('标准岗位',r=>ref('jobs',r.job_id)),col('职级',r=>ref('grades',r.grade_id)),statusCol()]},
-  people:{label:'人员档案',section:'人员与任职',collection:'people',endpoint:'people',description:'集团人员身份长期保留；跨店、调动或复聘时沿用原始人员编号。',note:'同名不代表同一人。人员编号一经分配不复用，复聘请在原档案下新增雇佣经历。',fields:()=>[groupField(),field('person_number','永久人员编号','text',{help:'新增时留空由系统分配；原编号不因调店而变化'}),field('full_name','姓名','text',{required:true})],columns:[col('人员',r=>`<span class="cell-title">${text(r.full_name)}</span><span class="cell-sub">${text(r.person_number)}</span>`),col('集团',r=>ref('groups',r.group_id)),col('雇佣记录',r=>String((state.data.employments||[]).filter(e=>same(e.person_id,r.id)).length)),statusCol()]},
+  people:{label:'人员档案',section:'人员与任职',collection:'people',endpoint:'people',description:'集团人员身份长期保留；跨店、调动或复聘时沿用原始人员编号。',note:'同名不代表同一人。人员编号一经分配不复用，复聘请在原档案下新增雇佣经历。',fields:()=>[groupField(),field('person_number','永久人员编号','text',{help:'新增时留空由系统分配；原编号不因调店而变化'}),field('full_name','姓名','text',{required:true})],columns:[col('人员',r=>`<span class="cell-title">${text(r.full_name)}${(state.data.employments||[]).some(e=>same(e.person_id,r.id)&&e.status==='active'&&e.employment_type==='outsourced')?' <small class="badge pending">外包服务</small>':''}</span><span class="cell-sub">${text(r.person_number)}</span>`),col('集团',r=>ref('groups',r.group_id)),col('雇佣记录',r=>String((state.data.employments||[]).filter(e=>same(e.person_id,r.id)).length)),statusCol()]},
   employments:{label:'雇佣经历',section:'人员与任职',collection:'employments',endpoint:'employments',description:'每次入职保存独立雇佣段；跨公司入职与短期跨店支援分别处理。',note:'离职日包含当天。复聘关联原已结束的雇佣经历，人员身份与编号保持不变。',fields:()=>[groupField(),field('person_id','人员','select',{source:'people',required:true}),companyField(),field('employment_type','用工类型','select',{required:true,options:options(['full_time','全职'],['part_time','兼职'],['hourly','小时工'],['outsourced','外包'],['FT','FT'],['PT','PT'],['LTPT','LTPT'])}),field('hire_date','入职日','date',{required:true}),field('leave_date','离职日','date',{help:'离职日当天仍计在雇佣范围'}),field('rehire_link','复聘关联原雇佣','select',{source:'employments'}),field('legal_subject_name','已核实的雇佣主体','text',{placeholder:'未知时留空'})],columns:[col('人员',r=>ref('people',r.person_id)),companyCol(),col('用工类型',r=>text(enumLabels[r.employment_type]||r.employment_type)),col('入职日',r=>date(r.hire_date)),col('离职日',r=>date(r.leave_date)),statusCol()]},
   assignments:{label:'任职记录',section:'人员与任职',collection:'assignments',endpoint:'assignments',description:'任职记录关联雇佣、公司岗位与部门，保留起止期间和主兼职信息。',note:'失效日为不再任职的第一天。例如任职至月底，失效日填写下月1日。同一雇佣的主任职期间不能重叠。',fields:()=>[groupField(),companyField(),field('employment_id','雇佣经历','select',{source:'employments',required:true}),field('department_id','任职部门','select',{source:'departments',required:true}),field('position_id','公司岗位','select',{source:'positions',required:true}),field('grade_id','人员职级','select',{source:'grades'}),field('work_area_id','档口或工作区','select',{source:'work_areas'}),field('valid_from','生效日','date',{required:true}),field('valid_to','失效日（不含当天）','date'),field('is_primary','任职性质','select',{required:true,options:options(['true','主任职'],['false','兼任'])})],columns:[col('人员 / 雇佣',r=>{const e=(state.data.employments||[]).find(e=>same(e.id,r.employment_id));return `${ref('people',e?.person_id)}<span class="cell-sub">${date(e?.hire_date)} 入职</span>`;}),companyCol(),col('部门 / 岗位',r=>`${ref('departments',r.department_id)}<span class="cell-sub">${ref('positions',r.position_id)}</span>`),col('档口',r=>ref('work_areas',r.work_area_id)),col('有效期',r=>`${date(r.valid_from)} 至 ${r.valid_to?date(r.valid_to):'持续'}`),col('性质',r=>r.is_primary?'主任职':'兼任'),statusCol()]},
   grants:{label:'基础资料授权',section:'平台管理',collection:'grants',endpoint:'grants',description:'授权账号访问指定集团、帐套或公司的新版基础资料。',note:'此处授权只作用于新版组织与人员基础，不自动授予工资、考勤等兼容业务权限。失效日为不再生效的第一天。',fields:()=>[field('account_id','系统账号','select',{source:'accounts',required:true}),groupField(),field('ledger_id','帐套范围','select',{source:'ledgers',help:'留空表示当前集团内授权范围'}),field('company_id','公司范围','select',{source:'companies',help:'留空表示上层已选范围'}),field('can_read','查看权限','select',{required:true,options:options(['true','允许查看'],['false','不允许查看'])}),field('can_write','维护权限','select',{required:true,options:options(['false','只读'],['true','允许维护'])}),field('valid_from','生效日','date',{required:true}),field('valid_to','失效日（不含当天）','date')],columns:[col('账号',r=>ref('accounts',r.account_id)),col('集团',r=>ref('groups',r.group_id)),col('帐套',r=>ref('ledgers',r.ledger_id,'集团范围')),col('公司',r=>ref('companies',r.company_id,'上层范围')),col('权限',r=>r.can_write?'查看与维护':r.can_read?'只读':'无查看权限'),col('有效期',r=>`${date(r.valid_from)} 至 ${r.valid_to?date(r.valid_to):'持续'}`)]},
@@ -68,9 +69,10 @@ const navGroups = [
   ['人员与任职',[['people','人员档案','○'],['employments','雇佣经历','↗'],['assignments','任职记录','◷'],['legacy-employees','兼容员工档案','▣'],['legacy-contract','人事合同','▤'],['legacy-exit','离职交接','↗'],['legacy-severance','离职结算','≡']]],
   ['考勤排班',[['time-calendar','排班','▤'],['time-segments','班段与打卡','◉'],['time-daily','考勤日报','▥'],['time-exceptions','考勤异常','!'],['time-monthly','考勤月报','▥'],['time-changes','换班与借调','⊡'],['legacy-leave','假期额度','◴'],['legacy-leavereq','请假单','◻'],['legacy-cashout','年假与折现','◴']]],
   ['薪酬管理',[['customer-payroll','薪酬核算','▤'],['hk-tools','香港用工与日薪','◷'],['legacy-payroll','算薪工作台','▤'],['legacy-payslip','工资条','▧'],['legacy-salaryitem','工资项目','＋'],['legacy-adjust','工资调整','↗'],['legacy-paypolicy','薪酬政策','≡'],['legacy-siledger','社保台账','▣'],['legacy-declare','申报表','▥'],['legacy-settlement','外包结算','□']]],
+  ['外包人事',[['outsourcing-suppliers','供应商管理','◇'],['outsourcing-contracts','服务合同','▤'],['outsourcing-people','外包服务人员','○'],['outsourcing-bills','账单与对账','▥'],['outsourcing-threads','沟通与待办','◷']]],
   ['招聘与发展',[['legacy-recruit','招聘','○'],['customer-performance','绩效考核','◇'],['legacy-perf','绩效','◇'],['legacy-training','培训与考试','▱']]],
   ['经营分析',[['legacy-dashboard','数据看板','▥'],['legacy-report','报表','▤']]],
-  ['个人工作',[['my-attendance','我的考勤','◷'],['my-payroll','我的工资','▧'],['my-leave','我的假期','◴'],['my-training','我的培训与考试','▱'],['legacy-home','原业务工作台','▦'],['legacy-approval','待办审批','✓'],['legacy-roles','我的权限','◈']]],
+  ['个人工作',[['my-outsource','我的外包服务','◇'],['my-attendance','我的考勤','◷'],['my-payroll','我的工资','▧'],['my-leave','我的假期','◴'],['my-training','我的培训与考试','▱'],['legacy-home','原业务工作台','▦'],['legacy-approval','待办审批','✓'],['legacy-roles','我的权限','◈']]],
   ['兼容排班工具',[['legacy-roster','原排班操作','▤'],['legacy-punch','原打卡采集','◉'],['legacy-attendance','原考勤明细','▥'],['legacy-att','原考勤月报','▥'],['legacy-close','原考勤封账','⊡'],['legacy-attx','原异常处理','!']]],
   ['平台管理',[['groups','集团','⊞'],['brands','品牌','◇'],['ledgers','业务帐套','▣'],['grants','基础资料授权','⌘'],['foundation-bridge','业务接续','⇄'],['foundation-import','花名册导入','⇧'],['legacy-ledger','原业务帐套与账号','▣'],['legacy-policy','业务制度','≡'],['legacy-exceptions','业务例外','!'],['legacy-health','运行自检','◉'],['legacy-mcp','AI开放接口','⌁']]],
 ];
@@ -90,8 +92,9 @@ function activeCollection(name){return state.data[name]||[];}
 function canWrite(key=state.route){
   const c=state.data.capabilities||{};
   if(key==='grants')return !!c.can_manage_access;
-  if(key==='groups')return !!c.can_create_group;
-  if(['brands','ledgers','jobs','grades','people'].includes(key))return !!c.can_write_shared;
+  if(key==='groups')return !!c.can_manage_access;
+  if(key==='people')return !!c.can_write_people;
+  if(['brands','ledgers','jobs','grades'].includes(key))return !!c.can_write_shared;
   return !!c.can_write;
 }
 function today(){return String(state.me?.today||new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'})).slice(0,10);}
@@ -153,6 +156,12 @@ async function renderPage(){
   $('#contextHelp').textContent=isLegacy?'兼容业务使用原授权范围':'基础资料按当前范围显示';
   if(route==='organization'||route==='legacy-org'||route==='legacy-headcount'){ $('#breadcrumb').innerHTML='<b>组织与编制</b>';return renderPlanning({kind:route==='legacy-headcount'?'headcount':'structure',container,bootstrap:state.data,context:state.context,request,toast,isCurrent:()=>id===state.loadId});}
   if(route.startsWith('time-')||route==='my-attendance'){ $('#breadcrumb').innerHTML='<b>排班与考勤</b>';return renderTime({kind:route==='my-attendance'?'calendar':route.slice(5),self:route==='my-attendance',container,bootstrap:state.data,context:state.context,request,token:state.token,toast,isCurrent:()=>id===state.loadId});}
+  if(route==='legacy-roles'){
+    const p=state.permissions.profile_code,labels={outsourced_staff:'外包服务人员',group_hr_director:'集团HR总监',company_hr_director:'公司HR总监',store_staff:'门店员工',station_staff:'档口人员',store_manager:'店长',demo:'全部权限演示',boss:'老板只读',config_admin:'系统配置管理员',hr_manager:'HR主管',payroll:'薪酬专员',trainer:'培训专员',recruiter:'招聘专员',hr_staff:'人事专员'};
+    const notice=p==='outsourced_staff'?'仅本人服务、排班考勤、培训和共享沟通。直营工资、内部假期额度、供应商账单及HR内部备注不开放。':p==='boss'?'查看授权范围的人事、经营及薪酬信息，不能修改业务或系统授权。':p==='group_hr_director'?'本集团全部HR业务，可查看本集团的跨品牌多店完整履历。':p==='company_hr_director'?'办理所授权公司及下属门店的HR业务；其他品牌人员和工资不开放。':'使用当前岗位分配的业务入口，人员与公司资料按授权范围显示。';
+    $('#breadcrumb').innerHTML='<b>我的权限</b>';container.innerHTML=heading('我的岗位与业务范围',state.me?.display_name||'')+`<section class="card" data-permission-summary><h2>${esc(labels[p]||'业务授权账号')}</h2><p>${esc(notice)}</p></section>`+navGroups.map(([group,entries])=>{const allowed=entries.filter(([r])=>r!=='legacy-roles'&&canOpenRoute(r,state.permissions));return allowed.length?`<details class="card"><summary><b>${esc(group)}</b> · ${allowed.length}个入口</summary><div class="node-chips">${allowed.map(([r,l])=>`<a href="#${esc(r)}" class="badge">${esc(l)}</a>`).join('')}</div></details>`:'';}).join('');return;
+  }
+  if(route.startsWith('outsourcing-')||route==='my-outsource'){ $('#breadcrumb').innerHTML='<b>外包人事与供应商</b>';return renderOutsourcing({kind:route==='my-outsource'?'people':route.slice(12),self:route==='my-outsource',container,request,bootstrap:state.data,context:state.context,token:state.token,toast,isCurrent:()=>id===state.loadId});}
   if(route==='home'){$('#breadcrumb').innerHTML='<b>工作台</b>';renderHome();return;}
   if(['my-payroll','my-training','my-leave'].includes(route)){$('#breadcrumb').innerHTML=`<b>${route==='my-payroll'?'我的工资':route==='my-leave'?'我的假期':'我的培训与考试'}</b>`;return renderEmployeeSelf({kind:route==='my-payroll'?'pay':route==='my-leave'?'leave':'training',container,request,me:state.me,token:state.token,toast,capabilities:state.permissions,isCurrent:()=>id===state.loadId});}
   if(route==='hk-tools'){$('#breadcrumb').innerHTML='<b>香港用工与日薪</b>';return renderHKTools({container,bootstrap:state.data,context:state.context,token:state.token,request,toast,isCurrent:()=>id===state.loadId});}
@@ -208,7 +217,7 @@ function getRows(config){
 }
 function renderList(config){
   const permission=canWrite(state.route);
-  $('#content').innerHTML=heading(config.label,config.description,`<button id="reloadList">刷新</button>${permission?`<button class="primary" id="newRecord">＋ 新增${esc(config.label)}</button>`:''}`)+
+  $('#content').innerHTML=heading(config.label,config.description,`<button id="reloadList">刷新</button>${permission&&(state.route!=='groups'||state.data.capabilities?.can_create_group)?`<button class="primary" id="newRecord">＋ 新增${esc(config.label)}</button>`:''}`)+
     `${!permission?'<div class="notice">当前账号以只读方式查看此范围的基础资料。</div>':''}`+
     `<section class="card list-card"><div class="list-tools"><input class="search-input" id="listSearch" aria-label="搜索${esc(config.label)}" placeholder="搜索名称、编码或相关组织" value="${esc(state.query)}"><span class="record-total" id="recordTotal"></span></div><div class="table-wrap" id="listTable"></div><div class="pagination" id="listPagination"></div></section>`;
   $('#reloadList').onclick=()=>runRefresh();
@@ -348,7 +357,7 @@ function sendLegacySession(frame){
   if(frame?.contentWindow&&state.token)frame.contentWindow.postMessage({type:'tyhr:session',token:state.token,group_id:state.context.group_id,ledger_id:state.context.ledger_id,company_id:state.context.company_id},location.origin);
 }
 function renderLegacy(key,meta){
-  const notice=state.data.legacy?.scope_notice||'兼容业务按原授权范围显示；新版帐套与公司筛选尚不改变旧业务数据范围。';
+  const notice=state.data.legacy?.scope_notice||'兼容记录按原授权范围显示；当前用工及外包服务请查看新版人员档案与外包人事。';
   $('#content').className='legacy-host';
   $('#content').innerHTML=`<div class="legacy-heading">${heading(meta[0],'')}<div class="notice warning">${esc(notice)} 顶部范围选择在此暂停。</div></div><iframe class="legacy-frame" id="legacyFrame" title="${esc(meta[0])}" src="/?embed=1#${encodeURIComponent(key)}"></iframe>`;
   $('#legacyFrame').addEventListener('load',()=>sendLegacySession($('#legacyFrame')));
@@ -381,7 +390,7 @@ $('#editorForm').onsubmit=saveEditor;
     state.page=1;state.query='';rememberContext();await runRefresh();
   };
 });
-function readRoute(){const key=(location.hash.slice(1).split('/')[0]||'home');return key==='home'||configs[key]||key.startsWith('time-')||['my-attendance','my-payroll','my-training','my-leave','customer-payroll','customer-performance','foundation-bridge','foundation-import','organization','hk-tools'].includes(key)||(key.startsWith('legacy-')&&legacy[key.slice(7)])?key:'home';}
+function readRoute(){const key=(location.hash.slice(1).split('/')[0]||'home');return key==='home'||configs[key]||key.startsWith('outsourcing-')||key==='my-outsource'||key.startsWith('time-')||['my-attendance','my-payroll','my-training','my-leave','customer-payroll','customer-performance','foundation-bridge','foundation-import','organization','hk-tools'].includes(key)||(key.startsWith('legacy-')&&legacy[key.slice(7)])?key:'home';}
 window.addEventListener('hashchange',()=>{state.route=readRoute();state.page=1;state.query='';$('#workspace').classList.remove('nav-open');if(state.token){renderNavigation();renderPage();}});
 state.route=readRoute();
 if(state.token)enter().catch(error=>showLogin(error.message));else showLogin();

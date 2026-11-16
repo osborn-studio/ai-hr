@@ -7,7 +7,7 @@ import * as foundation from './foundation.mjs';
 
 export const RESOURCES=['ledger'];
 export const VERSION='TY-ACCOUNTS-v1';
-const summaries={group_hr_director:'本集团全部HR、组织编制和跨品牌雇佣历史；不能访问其他集团',company_hr_director:'授权公司及下属门店的HR业务、组织岗位和编制；不读取其他品牌历史',config_admin:'系统参数、组织基础、角色授权与制度；不办理工资或绩效',demo:'全部功能与授权范围',boss:'集团经营、人事与薪酬只读；不能修改业务或授权',hr_manager:'集团人事、招聘、薪酬、绩效和培训；无系统授权配置',recruiter:'招聘需求与招聘流程；人员只读，不算薪',payroll:'工资、薪酬规则和考勤；人员只读，不办理雇佣',trainer:'培训课程、场次及考试；人员只读，不算薪',hr_staff:'基础人事、入离调转；不算薪或修改系统授权',store_manager:'本店人员、考勤排班与请假；只能查看本人薪资',store_staff:'本人资料、请假、考勤与培训；不能看他人工资',station_staff:'本人资料、档口任职、请假、考勤与培训；不能看他人工资'};
+const summaries={outsourced_staff:'本人服务派驻、考勤和培训、与HR及供应商沟通；不看直营工资和供应商账单',outsource_hr:'授权外包供应商、合同、服务人员、沟通及账单管理；不做直营人事薪资',vendor_contact:'仅绑定供应商的合同、授权服务人员、共享沟通与已共享账单；不读内部备注和其他供应商',group_hr_director:'本集团全部HR、组织编制和跨品牌雇佣历史；不能访问其他集团',company_hr_director:'授权公司及下属门店的HR业务、组织岗位和编制；不读取其他品牌历史',config_admin:'系统参数、组织基础、角色授权与制度；不办理工资或绩效',demo:'全部功能与授权范围',boss:'集团经营、人事与薪酬只读；不能修改业务或授权',hr_manager:'集团人事、招聘、薪酬、绩效和培训；无系统授权配置',recruiter:'招聘需求与招聘流程；人员只读，不算薪',payroll:'工资、薪酬规则和考勤；人员只读，不办理雇佣',trainer:'培训课程、场次及考试；人员只读，不算薪',hr_staff:'基础人事、入离调转；不算薪或修改系统授权',store_manager:'本店人员、考勤排班与请假；只能查看本人薪资',store_staff:'本人资料、请假、考勤与培训；不能看他人工资',station_staff:'本人资料、档口任职、请假、考勤与培训；不能看他人工资'};
 const q=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows;
 const same=(a,b)=>String(a)===String(b);
 const fail=m=>{throw bizErr('E_TY_CONFLICT',m);};
@@ -41,12 +41,13 @@ async function metadata(tx,groupId) {
   WHERE pf.group_id=$1 ORDER BY CASE WHEN pf.person_id IS NULL THEN 0 ELSE 1 END,a.id`,[groupId]);
  for(const r of rows) {
   r.role_name=roleSpecs.find(s=>s.profile_code===r.profile_code)?.role_name ||
-   (r.profile_code==='group_hr_director'?'集团HR总监':r.profile_code==='company_hr_director'?'公司HR总监':r.profile_code==='store_manager'?'店长':r.profile_code==='station_staff'?'档口人员':r.company_name==='天意集团总部'?'总部员工·自助':'店员');
+   (r.profile_code==='outsourced_staff'?'外包服务人员':r.profile_code==='outsource_hr'?'外包人事专员':r.profile_code==='vendor_contact'?'供应商联系人':r.profile_code==='group_hr_director'?'集团HR总监':r.profile_code==='company_hr_director'?'公司HR总监':r.profile_code==='store_manager'?'店长':r.profile_code==='station_staff'?'档口人员':r.company_name==='天意集团总部'?'总部员工·自助':'店员');
   r.permission_summary=summaries[r.profile_code]||'';
   if(r.person_id)r.work_areas=(await q(tx,`SELECT DISTINCT w.id,w.name,w.mode FROM ty_position_assignment a JOIN ty_work_area w ON w.id=a.work_area_id
     WHERE a.employment_id IN(SELECT id FROM ty_employment WHERE person_id=$1 AND status='active')
       AND a.status='active' AND a.valid_from<=app_today() AND (a.valid_to IS NULL OR app_today()<a.valid_to) ORDER BY w.id`,[r.person_id]));
   else r.work_areas=[];
+  if(r.profile_code==='vendor_contact')r.supplier_name=(await q(tx,'SELECT s.name FROM ty_outsource_portal_user u JOIN ty_outsource_supplier s ON s.id=u.supplier_id WHERE u.account_id=$1',[r.account_id]))[0]?.name||'';
   r.permission_summary=summaries[r.profile_code];
  }
  return rows;

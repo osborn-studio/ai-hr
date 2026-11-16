@@ -34,11 +34,11 @@ export async function accessFor(tx, userId) {
   const companyTree=(await tx.query(`SELECT c.id,(to_jsonb(c)->>'parent_company_id')::bigint parent_company_id FROM ty_company c`)).rows;
   const ledgerTree=(await tx.query(`SELECT l.id,(to_jsonb(l)->>'parent_ledger_id')::bigint parent_ledger_id FROM ty_ledger l`)).rows;
   const within=(tree,id,root,key)=>{const seen=new Set();while(id&&!seen.has(String(id))){if(eq(id,root))return true;seen.add(String(id));id=tree.find(x=>eq(x.id,id))?.[key];}return false;};
-  const selfOnly=!!persona&&['store_staff','station_staff'].includes(persona.profile_code);
+  const selfOnly=!!persona&&['store_staff','station_staff','outsourced_staff'].includes(persona.profile_code);
   return {
-    admin, platformAdmin, grants, persona, selfOnly, selfPersonId:selfOnly?persona.person_id:null,
+    admin, platformAdmin, grants, persona, userId, selfOnly, selfPersonId:selfOnly?persona.person_id:null,
     canEmploymentWrite:!!(await tx.query("SELECT fn_role_can($1,'employment_manage','write') ok",[userId])).rows[0].ok,
-    group(gid, write=false) { return platformAdmin || grants.some(g=>eq(g.group_id,gid) && (!write || g.can_write)); },
+    group(gid, write=false) { return platformAdmin || (!write&&persona?.profile_code==='vendor_contact'&&eq(persona.group_id,gid)) || grants.some(g=>eq(g.group_id,gid) && (!write || g.can_write)); },
     shared(gid,write=false) { return platformAdmin || grants.some(g=>eq(g.group_id,gid) && (!write || (g.can_write && !g.ledger_id && !g.company_id))); },
     row(row,write=false) { return platformAdmin || grants.some(g=>eq(g.group_id,row.group_id) && (!write || g.can_write)
       && (!g.ledger_id || within(ledgerTree,row.ledger_id,g.ledger_id,'parent_ledger_id')) && (!g.company_id || within(companyTree,row.company_id ?? row.id,g.company_id,'parent_company_id'))); },
@@ -70,6 +70,14 @@ async function check(tx, access, collection, row, write) {
   if(collection==='groups') { if(!access.admin || (!access.platformAdmin&&(!row.id||!access.group(row.id,true)))) deny('只能维护已授权集团'); return; }
   if(collection==='grants') { if(!access.admin||!access.group(row.group_id,true)) deny('只能维护本集团授权'); return; }
   const ctx=await withContext(tx,collection,row);
+  if(write&&['people','external-identities'].includes(collection)&&access.persona?.profile_code==='company_hr_director'){
+    if(!access.group(ctx.group_id,true))deny();
+    const pid=collection==='people'?ctx.id:ctx.person_id;
+    if(!pid){if(collection==='external-identities')deny('请关联本公司人员');return ctx;}
+    const employments=(await tx.query(`SELECT e.*,c.ledger_id FROM ty_employment e JOIN ty_company c ON c.id=e.company_id WHERE e.person_id=$1 AND e.status<>'cancelled'AND e.hire_date<=app_today()AND(e.leave_date IS NULL OR e.leave_date>=app_today())`,[pid])).rows;
+    const pending=(await tx.query(`SELECT EXISTS(SELECT 1 FROM ty_audit a WHERE a.actor_id=$1 AND a.action='create'AND a.entity_kind='people'AND a.entity_id=$2 AND NOT EXISTS(SELECT 1 FROM ty_employment WHERE person_id=$2))ok`,[access.userId,pid])).rows[0].ok;
+    if(!pending&&!employments.some(e=>access.row(e,true)))deny('只能维护本公司当前人员或本人新建的待入职档案');return ctx;
+  }
   if(SHARED.has(collection)) { if(!access.shared(ctx.group_id,write)) deny('共享主档的维护需要集团级授权'); }
   else if(!access.row(ctx,write)) deny();
   return ctx;
@@ -96,6 +104,11 @@ function payload(collection, input) {
 }
 export async function bootstrap(tx,{userId,groupId,ledgerId,companyId}) {
   const access=await accessFor(tx,userId);
+  if(['vendor_contact','outsource_hr'].includes(access.persona?.profile_code)){
+    const gid=access.persona.group_id;if(groupId&&!eq(groupId,gid))deny();
+    const groups=(await tx.query('SELECT id,code,name,status FROM ty_group WHERE id=$1',[gid])).rows;
+    return{groups,brands:[],ledgers:[],companies:[],departments:[],work_areas:[],jobs:[],grades:[],positions:[],people:[],employments:[],assignments:[],grants:[],accounts:[],external_identities:[],capabilities:{can_write:false,can_manage_access:false,can_create_group:false,can_write_shared:false},context:{group_id:gid,ledger_id:null,company_id:null},counts:{groups:groups.length,ledgers:0,companies:0,people:0,employments:0},legacy:{available:false}};
+  }
   const allGroups=(await tx.query('SELECT * FROM ty_group ORDER BY id')).rows;
   const groups=allGroups.filter(g=>access.group(g.id));
   let gid=groupId || groups[0]?.id || null;
@@ -115,9 +128,10 @@ export async function bootstrap(tx,{userId,groupId,ledgerId,companyId}) {
   const shared=async table=>gid?(await tx.query(`SELECT * FROM ${table} WHERE group_id=$1 ORDER BY id`,[gid])).rows:[];
   const owned=async table=>ids.length?(await tx.query(`SELECT * FROM ${table} WHERE company_id=ANY($1::bigint[]) ORDER BY id`,[ids])).rows:[];
   const employments=(await owned('ty_employment')).filter(e=>!access.selfOnly||eq(e.person_id,access.selfPersonId));
+  const pendingPeople=access.persona?.profile_code==='company_hr_director'?(await tx.query("SELECT DISTINCT entity_id FROM ty_audit a WHERE actor_id=$1 AND action='create'AND entity_kind='people'AND NOT EXISTS(SELECT 1 FROM ty_employment e WHERE e.person_id=a.entity_id)",[userId])).rows.map(r=>String(r.entity_id)):[];
   const people=(await shared('ty_person')).filter(p=>(!access.selfOnly||eq(p.id,access.selfPersonId))&&(access.shared(gid,true)||access.admin
     ||access.grants.some(g=>eq(g.group_id,gid)&&!g.ledger_id&&!g.company_id)
-    ||employments.some(e=>eq(e.person_id,p.id))));
+    ||pendingPeople.includes(String(p.id))||employments.some(e=>eq(e.person_id,p.id))));
   const assignments=(await owned('ty_position_assignment')).filter(a=>employments.some(e=>eq(e.id,a.employment_id)));
   const grants=access.admin ? await shared('ty_access_grant'):access.grants.filter(g=>eq(g.group_id,gid));
   // Company-only grants derive their ledger from the actual company row. A null
@@ -131,7 +145,7 @@ export async function bootstrap(tx,{userId,groupId,ledgerId,companyId}) {
     positions:await owned('ty_company_position'),people,employments,assignments,grants,
     external_identities:(access.admin || access.grants.some(g=>eq(g.group_id,gid)&&!g.ledger_id&&!g.company_id)) ? (await shared('ty_external_identity')).filter(x=>people.some(p=>eq(p.id,x.person_id)) || (access.admin&&!x.person_id)):[],
     accounts:access.admin?(await tx.query(access.platformAdmin?'SELECT id,login,display_name,status FROM sys_account ORDER BY id':'SELECT a.id,a.login,a.display_name,a.status FROM sys_account a JOIN ty_test_account_profile p ON p.account_id=a.id WHERE p.group_id=$1 ORDER BY a.id',access.platformAdmin?[]:[gid])).rows:[],
-    capabilities:{can_write:canWrite,can_manage_access:access.admin,can_create_group:access.platformAdmin,can_write_shared:gid?access.shared(gid,true):access.admin},
+    capabilities:{can_write:canWrite,can_write_people:access.canEmploymentWrite&&(access.shared(gid,true)||access.persona?.profile_code==='company_hr_director'),can_manage_access:access.admin,can_create_group:access.platformAdmin,can_write_shared:gid?access.shared(gid,true):access.admin},
     context:{group_id:gid,ledger_id:ledgerId||null,company_id:companyId||null},
     counts:{groups:groups.length,ledgers:ledgers.length,companies:scoped.length,people:people.length,employments:employments.length},
     legacy:{available:true,scope_notice:'兼容业务按原授权范围显示；新版帐套与公司筛选尚不改变旧业务数据范围'},

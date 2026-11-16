@@ -11,15 +11,18 @@ export async function personaFor(tx,userId) {
     WHERE p.account_id=$1`,[userId])).rows[0]||null;
 }
 const denied=message=>{throw bizErr('E_RESOURCE_FORBIDDEN',message);};
-const staff=new Set(['store_staff','station_staff']);
+const staff=new Set(['store_staff','station_staff','outsourced_staff']);
 const store=new Set([...staff,'store_manager']);
-const selfPaths=new Set(['/api/time/my','/api/customer-payroll/my','/api/training/my','/api/exam/my-board']);
+const selfPaths=new Set(['/api/outsource/my','/api/time/my','/api/customer-payroll/my','/api/training/my','/api/exam/my-board']);
 const selfExam=new Set(['/api/exam/paper','/api/exam/start','/api/exam/submit','/api/exam/result','/api/exam/ledger','/api/exam/tasks','/api/exam/window','/api/exam/review','/api/exam/event']);
 
 export async function authorizePersonaRequest(tx,{userId,pathname,method}) {
   const p=await personaFor(tx,userId);if(!p)return;
   const read=method==='GET'||method==='HEAD';
   const personal=pathname.startsWith('/api/me');
+  if(['group_hr_director','company_hr_director'].includes(p.profile_code)&&(/^\/api\/(ledger|policy|access|accounts|admin|mcp|health|checks|coverage)(?:\/|$)/.test(pathname)||(!read&&/^\/api\/roles(?:\/|$)/.test(pathname))))denied('HR总监管理授权集团或公司业务；系统级账号、帐库和全局制度由配置管理员维护');
+  if(p.profile_code==='outsourced_staff'&&/^\/api\/(customer-payroll|customer-performance|payslip|salary|payroll|leave|training\/manage|settlement)(?:\/|$)/.test(pathname))denied('外包服务人员只使用本人派驻、考勤、培训与沟通；企业直营薪酬和外包账单不开放');
+  if(['vendor_contact','outsource_hr'].includes(p.profile_code)&&!personal&&pathname!=='/api/foundation/bootstrap'&&!pathname.startsWith('/api/outsource/'))denied('此外包账号仅开放授权的供应商服务与沟通门户');
   if(p.profile_code==='demo'||personal||selfPaths.has(pathname))return;
   if(p.profile_code==='boss'&&!read&&!pathname.startsWith('/api/hk-tools/'))denied('老板账号为业务只读，不能修改业务或系统授权');
   if(p.profile_code==='config_admin') {
@@ -30,7 +33,7 @@ export async function authorizePersonaRequest(tx,{userId,pathname,method}) {
   if(staff.has(p.profile_code)) {
     const basic=pathname==='/api/foundation/bootstrap'||/^\/api\/foundation\/people\/\d+\/timeline$/.test(pathname);
     const selfLeave=new Set(['/api/leave/balance','/api/leave/apply','/api/leave/types']);
-    const allowed=pathname==='/api/time/export.csv'||basic||selfExam.has(pathname)||selfLeave.has(pathname)||pathname==='/api/payslip'||pathname.startsWith('/api/approval/my')||pathname.startsWith('/api/approval/mine');
+    const allowed=pathname==='/api/outsource/threads'||/^\/api\/outsource\/threads\/\d+\/messages$/.test(pathname)||pathname==='/api/time/export.csv'||basic||selfExam.has(pathname)||selfLeave.has(pathname)||pathname==='/api/payslip'||pathname.startsWith('/api/approval/my')||pathname.startsWith('/api/approval/mine');
     if(!allowed)denied('普通员工账号仅提供本人资料、工资、假期和学习自助功能');
   }
 }

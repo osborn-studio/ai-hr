@@ -1,3 +1,5 @@
+import * as outsourcing from './services/outsourcing.mjs';
+import {personaFor as outsourcePersona} from './services/persona-guard.mjs';
 import * as organizationPlanning from './services/organization.mjs';
 import * as advancedTime from './services/advanced-time.mjs';
 // ============================================================================
@@ -821,7 +823,7 @@ export async function createApp() {
       }
 
       // New workspace entry; legacy root remains stable for existing integrations/tests.
-      if (req.method === 'GET' && ['/workspace','/workspace.html','/workspace.mjs','/workspace.css','/workspace-permissions.mjs','/employee-self-ui.mjs','/customer-workbench.mjs','/foundation-import-ui.mjs','/organization-view.mjs','/hk-tools-ui.mjs','/scope-tree.mjs','/organization-planning.mjs','/advanced-time-ui.mjs','/legacy-theme.css'].includes(url.pathname)) {
+      if (req.method === 'GET' && ['/workspace','/workspace.html','/workspace.mjs','/workspace.css','/workspace-permissions.mjs','/employee-self-ui.mjs','/customer-workbench.mjs','/foundation-import-ui.mjs','/organization-view.mjs','/hk-tools-ui.mjs','/scope-tree.mjs','/organization-planning.mjs','/advanced-time-ui.mjs','/legacy-theme.css','/outsourcing-ui.mjs'].includes(url.pathname)) {
         const file = url.pathname === '/workspace' ? 'workspace.html' : url.pathname.slice(1);
         if (file.endsWith('.html')) {
           const nonce = randomBytes(16).toString('base64');
@@ -1125,6 +1127,31 @@ export async function createApp() {
         return json(res,404,{error:'E_TY_NOT_FOUND',message:'业务入口不存在'});
       }
 
+      if(url.pathname.startsWith('/api/outsource/')){
+        const parts=url.pathname.split('/').filter(Boolean),actor=await withTx(db,t=>outsourcePersona(t,uid));
+        const personal=['store_staff','station_staff','outsourced_staff'].includes(actor?.profile_code);
+        const args={userId:uid,groupId:url.searchParams.get('group_id'),companyId:url.searchParams.get('company_id'),ledgerId:url.searchParams.get('ledger_id'),self:url.pathname==='/api/outsource/my'};
+        if(req.method==='GET'&&['/api/outsource/board','/api/outsource/my'].includes(url.pathname))return await runRead(res,t=>outsourcing.board(t,args));
+        if(req.method==='GET'&&parts[2]==='bills'&&parts.length===4)return await runRead(res,t=>outsourcing.billDetail(t,{userId:uid,id:parts[3]}));
+        if(req.method==='GET'&&parts[2]==='bills'&&parts[4]==='print'){const content=await withTx(db,t=>outsourcing.printBill(t,{userId:uid,id:parts[3]}));res.writeHead(200,{'content-type':'text/html; charset=utf-8',...htmlHeaders(randomBytes(16).toString('base64'))});return res.end(content);}
+        if(req.method==='GET'&&parts[2]==='bills'&&parts[4]==='export.csv'){const content=await withTx(db,t=>outsourcing.exportBill(t,{userId:uid,id:parts[3]}));res.writeHead(200,{...CSV_HEADERS,...SEC_HEADERS,'content-disposition':contentDisposition('supplier-statement.csv')});return res.end(content);}
+        if(['POST','PUT'].includes(req.method)){
+          let input;try{input=JSON.parse((await readBody(req)).toString('utf8'));}catch(e){if(e.code)throw e;throw bizErr('E_TY_ARGUMENT','Invalid JSON');}
+          let fn;
+          if(parts[2]==='suppliers')fn=t=>outsourcing.saveSupplier(t,{userId:uid,id:parts[3]||null,input});
+          if(parts[2]==='engagements')fn=t=>outsourcing.saveEngagement(t,{userId:uid,id:parts[3]||null,input});
+          if(parts[2]==='contracts')fn=t=>outsourcing.saveContract(t,{userId:uid,id:parts[3]||null,input});
+          if(parts[2]==='threads'&&parts.length===3)fn=t=>outsourcing.createThread(t,{userId:uid,input,self:personal});
+          if(parts[2]==='threads'&&parts[4]==='messages')fn=t=>outsourcing.postMessage(t,{userId:uid,id:parts[3],input,self:personal});
+          if(parts[2]==='threads'&&parts[4]==='resolve')fn=t=>outsourcing.resolveThread(t,{userId:uid,id:parts[3],input});
+          if(parts[2]==='bills'&&parts.length===3)fn=t=>outsourcing.createBill(t,{userId:uid,input});
+          if(parts[2]==='bills'&&parts[4]==='lines')fn=t=>outsourcing.saveBillLine(t,{userId:uid,billId:parts[3],id:parts[5]||null,input});
+          if(parts[2]==='bills'&&parts[4]==='generate')fn=t=>outsourcing.generateBill(t,{userId:uid,id:parts[3]});
+          if(parts[2]==='bills'&&parts[4]==='decide')fn=t=>outsourcing.decideBill(t,{userId:uid,id:parts[3],input});
+          if(fn)return await runWrite(res,{actor:uid,action:'outsource.'+parts[2],subject:parts[3]||String(input.contract_id||input.group_id),fn});
+        }
+        return json(res,404,{error:'E_TY_NOT_FOUND'});
+      }
       if(url.pathname==='/api/organization/headcount'){
         if(req.method==='GET')return await runRead(res,tx=>organizationPlanning.plans(tx,{userId:uid,groupId:url.searchParams.get('group_id'),period:url.searchParams.get('period')||'2026-11',asOf:url.searchParams.get('as_of')}));
         if(req.method==='PUT'){const input=JSON.parse((await readBody(req)).toString('utf8'));return await runWrite(res,{actor:uid,action:'organization.headcount',subject:String(input.company_id),fn:tx=>organizationPlanning.savePlan(tx,{userId:uid,input})});}
@@ -2693,7 +2720,7 @@ export async function createApp() {
           const profile=hasProfiles?(await tx.query('SELECT profile_code,person_id FROM ty_test_account_profile WHERE account_id=$1',[uid])).rows[0]:null;
           const person=(await tx.query('SELECT person_id FROM sys_account WHERE id=$1',[uid])).rows[0]?.person_id;
           return {resources:Object.fromEntries(rows.map(r=>[r.resource_code,{can_read:r.can_read,can_write:r.can_write}])),
-            profile_code:profile?.profile_code||null,has_person:!!person};
+            profile_code:profile?.profile_code||null,has_person:!!person,has_outsource:profile?.profile_code==='outsourced_staff'||(profile?.person_id&&(await tx.query("SELECT to_regclass('public.ty_outsource_engagement')IS NOT NULL ok")).rows[0].ok?!!(await tx.query('SELECT EXISTS(SELECT 1 FROM ty_outsource_engagement WHERE person_id=$1)ok',[profile.person_id])).rows[0].ok:false)};
         });
       }
 
