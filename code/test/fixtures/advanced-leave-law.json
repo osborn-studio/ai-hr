@@ -1,0 +1,887 @@
+{
+  "schema_version": "1.0",
+  "artifact_title": "高级假期独立业务测试夹具V1（全部虚构）",
+  "created_date": "2026-11-17",
+  "rule_research_snapshot_date": "2026-11-17",
+  "all_facts_people_ids_amounts_are_fictional": true,
+  "is_software_acceptance_pass": false,
+  "is_legal_individual_qualification_determination": false,
+  "independence_statement": "期望值来自官方规则定位、独立手算及已明确设计契约；不导入或调用任何应用实现函数。后续测试须适配实现输出并与本夹具比较，不能把实现输出反写作期望值。",
+  "numeric_contract": {
+    "money_and_day_decimal_values": "decimal strings; never binary floating point",
+    "exact_fraction": "numerator/denominator; compare rationals, do not compare display-only rounded strings as legal pay targets",
+    "date_interval_default": "[start,end_exclusive); only fields explicitly named inclusive include final day",
+    "rule_scoping": "source versions, calendar schemes and legal employer are explicit; fictional future simulation dates do not assert future law unchanged"
+  },
+  "assertion_scope": "包含法定资格与算术、设计状态守卫；不是系统当前API响应格式，也不证明流程、页面、权限、DB事务或外部连通已经实现。",
+  "sources": {
+    "CN01": {
+      "url": "https://xzfg.moj.gov.cn/front/law/detail?LawID=208",
+      "title": "职工带薪年休假条例",
+      "locator": "第2–5条",
+      "effective_from": "2008-01-01"
+    },
+    "CN02": {
+      "url": "https://www.jiangmen.gov.cn/attachment/0/287/287579/2982353.pdf",
+      "title": "企业职工带薪年休假实施办法（政府保存全文）",
+      "locator": "第3–5、9–13、18条；PDF第1–2页",
+      "effective_from": "2008-09-18"
+    },
+    "CN07": {
+      "url": "https://rsj.sh.gov.cn/tmsztc_17502/20250206/t0035_1430320.html",
+      "title": "上海人社：职工请病假后，病假工资具体怎么算？",
+      "locator": "2025-01-10公开答复全文",
+      "effective_status": "地区示例，非全国默认"
+    },
+    "HK01": {
+      "url": "https://www.labour.gov.hk/eng/labour/Continuous_Contract_EduTool.htm",
+      "title": "连续性合约新规定教育工具",
+      "locator": "资格条件、首3周注释、页面末缺勤认定工时说明",
+      "effective_from": "2026-01-18"
+    },
+    "HK03": {
+      "url": "https://www.labour.gov.hk/eng/news/latest_holidays2026.htm",
+      "title": "2026年法定假日",
+      "locator": "2026年度15日表及碰撞说明",
+      "effective_from": "2026-01-01"
+    },
+    "HK04": {
+      "url": "https://www.labour.gov.hk/eng/faq/cap57f_whole.htm",
+      "title": "法定假日问答",
+      "locator": "Q2–Q6",
+      "effective_status": "2026-11-17所读现行正文"
+    },
+    "HK05": {
+      "url": "https://www.labour.gov.hk/eng/faq/cap57i_whole.htm",
+      "title": "年假问答",
+      "locator": "Q1、Q4–Q6",
+      "effective_status": "2026-11-17所读现行正文"
+    },
+    "HK06": {
+      "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/04.pdf",
+      "title": "雇佣条例简明指南第4章",
+      "locator": "PDF第4–7页：年假、离职、共同假期年及例",
+      "effective_status": "包含2026假日的当前版"
+    },
+    "HK07": {
+      "url": "https://www.labour.gov.hk/eng/faq/cap57g_whole.htm",
+      "title": "疾病津贴问答",
+      "locator": "Q1–Q3",
+      "effective_status": "2026-11-17所读现行正文"
+    },
+    "HK08": {
+      "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/05.pdf",
+      "title": "雇佣条例简明指南第5章",
+      "locator": "PDF第1–4页：疾病津贴排除、两类及记录",
+      "effective_status": "2026-11-17所读当前版"
+    },
+    "HK09": {
+      "url": "https://www.labour.gov.hk/eng/labour/avgMonthSalaryCalculator.htm",
+      "title": "12个月平均工资计算器简明指引",
+      "locator": "指定日期表、历月注释、窗口示例、工资录入说明",
+      "effective_status": "2026-11-17所读现行正文"
+    },
+    "HK12": {
+      "url": "https://www.labour.gov.hk/eng/faq/cap57n_whole.htm",
+      "title": "侍产假问答",
+      "locator": "Q2、Q4、Q6、Q8–Q12",
+      "effective_status": "5日及产后14周窗口现行版"
+    }
+  },
+  "case_count": 18,
+  "cases": [
+    {
+      "case_id": "L-H01",
+      "title": "内地跨主体累计工作年限不重置",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "CN01",
+        "CN02"
+      ],
+      "input": {
+        "jurisdiction": "CN",
+        "person_id": "FAKE-P001",
+        "new_employer_id": "FAKE-CN-B",
+        "cumulative_qualifying_service_years": "11",
+        "continuous_work_12_months_eligibility_verified": true,
+        "current_employer_tenure_days": 0,
+        "evidence_verified": true
+      },
+      "expected": {
+        "statutory_full_year_band_days": "10",
+        "cumulative_service_years_after_transfer": "11",
+        "current_employer_tenure_days": 0,
+        "new_employer_full_10_day_immediate_grant_inferred": false,
+        "requires_new_employer_proration": true
+      },
+      "must_reject_or_detect": [
+        "把累计工龄清为0或按本公司年资得5日",
+        "把10日全年档位直接当新单位当年立即完整发放"
+      ],
+      "independent_oracle_reason": "累计11年属于10至不足20年档；全年档位与新进年度折算独立。"
+    },
+    {
+      "case_id": "L-H02",
+      "title": "内地新进年度365分母与整天下取整",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "CN02"
+      ],
+      "input": {
+        "jurisdiction": "CN",
+        "calendar_year": 2026,
+        "hire_date": "2026-09-23",
+        "year_end_inclusive": "2026-12-31",
+        "qualifying_remaining_calendar_days": "100",
+        "full_year_band_days": "10",
+        "eligibility_verified": true,
+        "statutory_formula_version": "CN-ANNUAL-20080918"
+      },
+      "expected": {
+        "unrounded_days_fraction": {
+          "numerator": "200",
+          "denominator": "73"
+        },
+        "statutory_grant_days": "2",
+        "rounding_mode": "FLOOR",
+        "rounding_stage": "after_proration",
+        "formula_denominator": "365",
+        "optional_extra_benefit_days_not_inferred": true
+      },
+      "must_reject_or_detect": [
+        "四舍五入为3日",
+        "以366、20.67或21.75作年度折算分母",
+        "静默把不足整天发放成法定归属"
+      ],
+      "independent_oracle_reason": "1000/365约2.7397，法定新进折算不足整天不享受。"
+    },
+    {
+      "case_id": "L-H03",
+      "title": "内地离职已多休不追回",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "CN02"
+      ],
+      "input": {
+        "jurisdiction": "CN",
+        "employment_start": "2025-01-01",
+        "termination_date": "2026-06-30",
+        "calendar_days_in_current_year": "181",
+        "full_year_band_days": "10",
+        "statutory_days_already_arranged": "6",
+        "already_paid_untaken_leave_compensation": "0.00",
+        "currency": "CNY",
+        "annual_eligibility_and_band_verified": true
+      },
+      "expected": {
+        "unrounded_prorated_days_fraction": {
+          "numerator": "362",
+          "denominator": "73"
+        },
+        "termination_untaken_payable_days": "0",
+        "recover_already_arranged_days": "0",
+        "payroll_recovery_amount": "0.00",
+        "negative_balance_charge_created": false,
+        "forecast_balance_and_legal_final_entitlement_must_be_reconciled": true
+      },
+      "must_reject_or_detect": [
+        "按6−181/365×10生成员工应收款",
+        "自动从净工资追回已多安排法定年假",
+        "把原预测余额直接当终止折现目标"
+      ],
+      "independent_oracle_reason": "1810/365约4.9589，已安排6日，无正未休天数；实施办法第12条规定多安排不再扣回。"
+    },
+    {
+      "case_id": "L-H04",
+      "title": "内地未休报酬300%包含正常工资",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "CN01",
+        "CN02"
+      ],
+      "input": {
+        "jurisdiction": "CN",
+        "currency": "CNY",
+        "eligible_untaken_days": "2",
+        "verified_12_month_average_excluding_overtime": "6525.00",
+        "monthly_paid_day_divisor": "21.75",
+        "normal_pay_for_same_days_already_paid": "600.00",
+        "extra_untaken_compensation_already_paid": "300.00",
+        "employer_unable_to_arrange_and_employee_consent_verified": true
+      },
+      "expected": {
+        "daily_wage": "300.00",
+        "statutory_total_target_for_same_days": "1800.00",
+        "normal_pay_included_in_target": "600.00",
+        "extra_compensation_target": "1200.00",
+        "extra_compensation_remaining": "900.00",
+        "target_components_sum": "1800.00"
+      },
+      "must_reject_or_detect": [
+        "在正常工资600外再加完整1800",
+        "忽略已付额外300再次全发1200",
+        "计算基数未剔除加班工资"
+      ],
+      "independent_oracle_reason": "6525/21.75=300；2×300×3=1800，内含正常600，额外目标1200，减已付300尚欠900。"
+    },
+    {
+      "case_id": "L-H05",
+      "title": "法定年假到期不静默清零",
+      "classification": "verified_rule_and_design_guard",
+      "source_ids": [
+        "CN01",
+        "CN02"
+      ],
+      "input": {
+        "jurisdiction": "CN",
+        "simulation_date": "2027-01-01",
+        "legal_rule_snapshot_date": "2026-11-17",
+        "batch_id": "FAKE-CN-AL2026",
+        "statutory_days_unused": "3",
+        "arranged_days": "0",
+        "approved_carry": false,
+        "cash_settlement_confirmed": false,
+        "employee_written_personal_refusal": false
+      },
+      "expected": {
+        "source_legal_obligation_preserved": true,
+        "unresolved_statutory_days": "3",
+        "automatic_expiry_ledger_days": "0",
+        "automatic_cash_payment_instruction_created": false,
+        "task_required": "arrange_or_legal_settlement_review",
+        "other_uncontroversial_payroll_indefinitely_blocked": false
+      },
+      "must_reject_or_detect": [
+        "到期作废3日且无核定记录",
+        "用到期任务直接签发实际银行付款",
+        "假借法规空缺无限卡住其他无争议工资"
+      ],
+      "independent_oracle_reason": "没有合法安排、结清或书面事实的情况下，系统不得用定时器消灭原义务；该状态守卫为天意设计。"
+    },
+    {
+      "case_id": "L-H06",
+      "title": "内地地点未核不得套上海病假率",
+      "classification": "verified_rule_and_design_guard",
+      "source_ids": [
+        "CN07"
+      ],
+      "input": {
+        "jurisdiction": "CN",
+        "fake_brand": "香香鱼米",
+        "fake_stores": [
+          "FAKE-X01",
+          "FAKE-X02"
+        ],
+        "applicable_locality": null,
+        "locality_rule_version": null,
+        "sick_leave_accepted": true,
+        "uncontroversial_wage_amount": "10000.00",
+        "currency": "CNY"
+      },
+      "expected": {
+        "sick_pay_rule_status": "pending_locality_verification",
+        "statutory_sick_pay_amount": null,
+        "fallback_to_shanghai_rate": false,
+        "fallback_to_unpaid_or_absence": false,
+        "uncontroversial_payroll_can_proceed": true
+      },
+      "must_reject_or_detect": [
+        "把空地区当上海并默认统一80%给薪",
+        "用null资格生成0元或旷工",
+        "因为病假局部待核而无限期冻结10000无争议部分"
+      ],
+      "independent_oracle_reason": "上海公开问答是地区规则而非全国规则，缺适用地不能推定金额；局部待核状态由产品控制。"
+    },
+    {
+      "case_id": "L-H07",
+      "title": "香港417/468及首三周不能借未来时数",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK01"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "actual_employer_id": "FAKE-HK-A",
+        "weekly_boundaries": "Monday_to_Sunday_for_this_verified_example",
+        "week_start_dates": [
+          "2026-10-05",
+          "2026-10-12",
+          "2026-10-19",
+          "2026-10-26"
+        ],
+        "recognized_hours": [
+          "18",
+          "18",
+          "18",
+          "14"
+        ],
+        "employment_continuously_covers_all_four_weeks": true,
+        "new_rule_applies": true,
+        "first_three_week_variant_hours": [
+          "14",
+          "30",
+          "30"
+        ],
+        "future_hours_must_not_be_used_for_first_week": true
+      },
+      "expected": {
+        "weekly_hour_result": [
+          "pass_17",
+          "pass_17",
+          "pass_17",
+          "pass_68"
+        ],
+        "four_week_hours": "68",
+        "fourth_week_hour_condition_met": true,
+        "first_three_week_variant_hour_result": [
+          "fail",
+          "pass_17",
+          "pass_17"
+        ],
+        "first_week_variant_468_available": false,
+        "continuous_contract_before_four_weeks_inferred": false
+      },
+      "must_reject_or_detect": [
+        "将首周14小时用后面两周30小时补成468",
+        "把28天任意滑窗替代已核周边界",
+        "将四周68小时当首日即已取得连续性合约"
+      ],
+      "independent_oracle_reason": "18+18+18+14=68；首3周仅逐周17条件，不能用未来或尚不足4周的468。"
+    },
+    {
+      "case_id": "L-H08",
+      "title": "香港永久人号相同不跨雇主拼68小时",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK01"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "person_id": "FAKE-P008",
+        "group_id": "FAKE-TY",
+        "employer_weekly_hours": {
+          "FAKE-HK-A": [
+            "8",
+            "8",
+            "8",
+            "8"
+          ],
+          "FAKE-HK-B": [
+            "9",
+            "9",
+            "9",
+            "9"
+          ]
+        },
+        "all_four_weeks_employed_by_each": true
+      },
+      "expected": {
+        "four_week_hours_by_employer": {
+          "FAKE-HK-A": "32",
+          "FAKE-HK-B": "36"
+        },
+        "weekly_or_468_met_by_employer": {
+          "FAKE-HK-A": false,
+          "FAKE-HK-B": false
+        },
+        "group_68_hour_qualification_created": false
+      },
+      "must_reject_or_detect": [
+        "32+36按集团拼成68并赋予两个雇主连续性合约",
+        "按永久人号复制另一雇主资格结果"
+      ],
+      "independent_oracle_reason": "门槛对象是同一实际雇主；同集团不代替同雇主。"
+    },
+    {
+      "case_id": "L-H09",
+      "title": "香港共同假期年与周年归属/取整分支",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK05",
+        "HK06"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "common_year_case": {
+          "scheme": "COMMON_YEAR",
+          "hire_date": "2025-09-01",
+          "common_leave_year_start": "2025-01-01",
+          "common_leave_year_end_inclusive": "2025-12-31",
+          "first_period_calendar_days": "122",
+          "full_year_entitlement_days": "7",
+          "common_year_notice_requirement_verified": true,
+          "continuous_contract_qualification_verified": true
+        },
+        "anniversary_case": {
+          "scheme": "ANNIVERSARY",
+          "hire_date": "2025-09-01",
+          "first_service_year_end_exclusive": "2026-09-01",
+          "extra_or_advance_benefit_days": "0",
+          "continuous_contract_for_service_year_verified": true
+        }
+      },
+      "expected": {
+        "common_year_case": {
+          "unrounded_days_fraction": {
+            "numerator": "854",
+            "denominator": "365"
+          },
+          "first_period_days": "3",
+          "rounding_mode": "CEILING",
+          "automatic_assumption_all_other_HK_proration_rounds_up": false
+        },
+        "anniversary_case": {
+          "first_year_statutory_entitlement_days": "7",
+          "first_year_statutory_vesting_date": "2026-09-01",
+          "full_vested_first_year_days_before_anniversary": "0"
+        },
+        "full_year_service_band": {
+          "1": "7",
+          "2": "7",
+          "3": "8",
+          "4": "9",
+          "5": "10",
+          "6": "11",
+          "7": "12",
+          "8": "13",
+          "9_or_more": "14"
+        }
+      },
+      "must_reject_or_detect": [
+        "共同年122/365×7下取整为2",
+        "周年方案月一就当7日全部法定归属",
+        "把共同年首期向上规则套全部离职折算"
+      ],
+      "independent_oracle_reason": "共同年首不足12月的法定比例余数计整日；周年完成服务年度归属7日，两个模型分别处理。"
+    },
+    {
+      "case_id": "L-H10",
+      "title": "香港连续年假碰撞休息日/法定假日另建义务",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK03",
+        "HK06"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "annual_leave_start": "2026-06-15",
+        "annual_leave_end_exclusive": "2026-06-22",
+        "annual_leave_period_calendar_days": "7",
+        "statutory_holiday_dates": [
+          "2026-06-19"
+        ],
+        "appointed_rest_day_dates": [
+          "2026-06-21"
+        ],
+        "qualified_annual_leave_available_days": "14",
+        "statutory_holiday_pay_qualification_verified": true
+      },
+      "expected": {
+        "annual_leave_days_for_unbroken_period": "7",
+        "replacement_rest_day_obligation_count": 1,
+        "replacement_statutory_holiday_obligation_count": 1,
+        "replacement_obligations_link_to_original_dates": [
+          "2026-06-19",
+          "2026-06-21"
+        ],
+        "ordinary_TOIL_balance_debit_for_replacement": "0",
+        "automatic_full_pay_double_count_for_overlap": false
+      },
+      "must_reject_or_detect": [
+        "照搬内地只扣5日且遗漏另补义务",
+        "扣7日但另补义务为0",
+        "仅一笔普通调休抵两个原法定义务"
+      ],
+      "independent_oracle_reason": "指南第4页明确年假期间休息日/假日计入年假而另补；端午2026-06-19由法定假日表确认。"
+    },
+    {
+      "case_id": "L-H11",
+      "title": "香港在职不得全部买断14日法定年假",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK05",
+        "HK06"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "employment_status": "active",
+        "statutory_entitlement_days": "14",
+        "employee_requested_cash_in_lieu_days": "14",
+        "annual_leave_days_already_taken": "0",
+        "employee_choice_verified": true
+      },
+      "expected": {
+        "requested_full_buyout_decision": "reject",
+        "maximum_statutory_choice_days_above_10": "4",
+        "statutory_days_not_available_for_this_cash_choice": "10",
+        "cash_payment_created_before_valid_revised_choice": false
+      },
+      "must_reject_or_detect": [
+        "批准14日全部现金替假",
+        "为修正无效申请而未经新选择自动发4日现金",
+        "把合同额外年假与法定14日混成无条件现金池"
+      ],
+      "independent_oracle_reason": "在职员工可选择以款代假限超过10日部分；14−10=4，不代表系统可替员工自动作新选择。"
+    },
+    {
+      "case_id": "L-H12",
+      "title": "香港连续病假按事件而非单据判4日",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK07"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "illness_event_id": "FAKE-ILL012",
+        "applications": [
+          {
+            "id": "FAKE-REQ012A",
+            "start": "2026-11-09",
+            "end_exclusive": "2026-11-11"
+          },
+          {
+            "id": "FAKE-REQ012B",
+            "start": "2026-11-11",
+            "end_exclusive": "2026-11-13"
+          }
+        ],
+        "actual_employer_id": "FAKE-HK-A",
+        "continuous_contract_verified": true,
+        "certificate_covers_all_four_days": true,
+        "opening_category1_days": "4",
+        "opening_category2_days": "0",
+        "no_statutory_holiday_or_compensation_overlap": true,
+        "adw": "400.00",
+        "currency": "HKD",
+        "appropriate_medical_certificate_verified": true,
+        "other_statutory_eligibility_verified": true,
+        "paid_statutory_holiday_overlap": false,
+        "employees_compensation_payable": false
+      },
+      "expected": {
+        "recognized_consecutive_sickness_days": "4",
+        "qualifying_sickness_allowance_days": "4",
+        "daily_sickness_allowance": "320.00",
+        "total_sickness_allowance_target": "1280.00",
+        "closing_category1_days": "0",
+        "closing_category2_days": "0",
+        "payroll_adoption_readiness": "eligible_source",
+        "bank_paid_inferred": false
+      },
+      "must_reject_or_detect": [
+        "逐张2日单据均判不合格",
+        "两个入口分别扣完整4日",
+        "认定疾病津贴资格即标银行已发"
+      ],
+      "independent_oracle_reason": "同一完整连续疾病事件4日；400×4/5=320，4×320=1280。"
+    },
+    {
+      "case_id": "L-H13",
+      "title": "香港36/84类别及第二类证据守卫",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK07",
+        "HK08"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "continuous_contract_verified": true,
+        "qualified_sickness_days": "4",
+        "opening_category1_days": "2",
+        "opening_category2_days": "8",
+        "employer_requires_category2_hospital_proof": true,
+        "complete_evidence_variant": {
+          "standard_medical_certificate": true,
+          "category2_required_hospital_proof": true
+        },
+        "missing_evidence_variant": {
+          "standard_medical_certificate": true,
+          "category2_required_hospital_proof": false
+        },
+        "accrual_reference": {
+          "first_12_completed_employment_months_each": "2",
+          "later_completed_employment_months_each": "4"
+        },
+        "four_consecutive_sickness_day_condition_verified": true,
+        "other_statutory_eligibility_except_category2_proof_verified": true
+      },
+      "expected": {
+        "complete_evidence_variant": {
+          "consume_category1_days": "2",
+          "consume_category2_days": "2",
+          "closing_category1_days": "0",
+          "closing_category2_days": "6"
+        },
+        "missing_evidence_variant": {
+          "category2_confirmation_status": "pending_required_proof",
+          "unverified_category2_days_must_not_be_finalized": "2",
+          "unknown_amount_must_not_be_coerced_to_zero": true
+        },
+        "category_caps": {
+          "category1": "36",
+          "category2": "84",
+          "combined": "120"
+        },
+        "accrual_at_full_caps_creates_extra_statutory_days": "0"
+      },
+      "must_reject_or_detect": [
+        "只存总余额10而丢类别",
+        "第二类需核证明时直接正式给薪/扣账",
+        "总额已120仍额外累积4日"
+      ],
+      "independent_oracle_reason": "先使用首类余额2再使用第二类2；首类36、次类84和合计120是独立守卫，缺证分段待核不伪造0。"
+    },
+    {
+      "case_id": "L-H14",
+      "title": "香港有薪法定假日与疾病津贴不重叠",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK03",
+        "HK04",
+        "HK08"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "illness_start": "2026-09-28",
+        "illness_end_exclusive": "2026-10-03",
+        "illness_calendar_days": "5",
+        "paid_statutory_holiday_dates": [
+          "2026-10-01"
+        ],
+        "continuous_contract_verified": true,
+        "holiday_pay_qualification_verified": true,
+        "sickness_certificate_and_balance_verified": true,
+        "adw": "400.00",
+        "currency": "HKD",
+        "employees_compensation_payable": false
+      },
+      "expected": {
+        "paid_holiday_days": "1",
+        "sickness_allowance_days": "4",
+        "sickness_allowance_days_consumed": "4",
+        "statutory_holiday_pay_target": "400.00",
+        "sickness_allowance_target": "1280.00",
+        "total_leave_pay_targets": "1680.00",
+        "sickness_allowance_on_2026_10_01": "0.00",
+        "illness_history_preserved_for_all_five_days": true
+      },
+      "must_reject_or_detect": [
+        "5日疾病津贴1600另加假薪400",
+        "为排除重复给付而删除10月1日原疾病事实",
+        "误把已具假薪资格的国庆日病假给薪改4/5"
+      ],
+      "independent_oracle_reason": "法定假日享有假薪的疾病日排除疾病津贴：其余4日×320加假日400=1680；历史事实与给付分类分开。"
+    },
+    {
+      "case_id": "L-H15",
+      "title": "香港ADW历月窗口与成对排除",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK05",
+        "HK07",
+        "HK09"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "specified_date": "2026-11-16",
+        "employment_started_before_window": true,
+        "window_start": "2025-11-01",
+        "window_end_exclusive": "2026-11-01",
+        "calendar_days": "365",
+        "gross_wages_before_employee_MPF_deduction": "120000.00",
+        "lawfully_disregarded_underpaid_days": "10",
+        "wages_attributed_to_same_disregarded_days": "2000.00",
+        "fully_paid_annual_leave_days_in_window": "3",
+        "wages_included_for_fully_paid_annual_leave": "1200.00",
+        "currency": "HKD",
+        "display_rounding_only": "HALF_UP_2DP"
+      },
+      "expected": {
+        "window_calendar_months": "12",
+        "included_wages": "118000.00",
+        "included_days": "355",
+        "adw_exact_fraction": {
+          "numerator": "23600",
+          "denominator": "71"
+        },
+        "adw_display_only": "332.39",
+        "fully_paid_annual_leave_automatically_disregarded": false,
+        "statutory_sick_daily_rate_exact_fraction": {
+          "numerator": "18880",
+          "denominator": "71"
+        },
+        "display_rounding_must_not_define_final_pay_legal_rounding": true
+      },
+      "must_reject_or_detect": [
+        "只剔10日而不剔2000工资",
+        "只剔2000但仍除365",
+        "从2025-11-16滚动到2026-11-16代替该历月窗口",
+        "将全薪年假仅因假期名称而剔除",
+        "直接以月薪/30代ADW"
+      ],
+      "independent_oracle_reason": "120000−2000=118000；365−10=355；118000/355=23600/71。分数是精确目标，332.39仅展示精度。"
+    },
+    {
+      "case_id": "L-H16",
+      "title": "覆盖导入与并发预占基线冲突",
+      "classification": "design_contract_not_statutory_threshold",
+      "source_ids": [],
+      "input": {
+        "batch_id": "FAKE-BATCH016",
+        "preview": {
+          "baseline_revision": 7,
+          "mode": "replace_total_grant",
+          "total_granted_days": "10",
+          "used_days": "2",
+          "held_days": "1",
+          "replacement_total_grant_days": "8"
+        },
+        "current_before_apply": {
+          "revision": 8,
+          "total_granted_days": "10",
+          "used_days": "2",
+          "held_days": "2",
+          "available_days": "6"
+        },
+        "approved_revision": 7,
+        "approval_scope_verified": true
+      },
+      "expected": {
+        "apply_result": "baseline_revision_conflict",
+        "requires_new_preview_and_approval": true,
+        "current_after_rejected_apply": {
+          "revision": 8,
+          "total_granted_days": "10",
+          "used_days": "2",
+          "held_days": "2",
+          "available_days": "6"
+        },
+        "existing_consumption_and_hold_events_deleted": false
+      },
+      "must_reject_or_detect": [
+        "用旧批准覆盖当前预占",
+        "把目标总发放8误作增量另加8",
+        "对错版本仍返回导入成功"
+      ],
+      "independent_oracle_reason": "这是产品一致性守卫：预演r7无法批准对r8写入；独立期望明确完整原状态保持。"
+    },
+    {
+      "case_id": "L-H17",
+      "title": "同一假薪跨入口唯一采用及新版本净差",
+      "classification": "design_contract_and_fictional_financial_arithmetic",
+      "source_ids": [],
+      "input": {
+        "person_id": "FAKE-P017",
+        "actual_employment_id": "FAKE-EMP017",
+        "stable_parent_obligation_id": "FAKE-HK-LEAVEPAY017",
+        "currency": "HKD",
+        "source_revision1_target": "800.00",
+        "entries": [
+          {
+            "entry": "leave",
+            "alias": "FAKE-LEAVE017"
+          },
+          {
+            "entry": "attendance_monthly",
+            "alias": "FAKE-MONTH017"
+          },
+          {
+            "entry": "manual_payroll_source",
+            "alias": "FAKE-MANUAL017"
+          }
+        ],
+        "all_three_aliases_verified_to_same_parent": true,
+        "normal_wage_already_covering_same_period": "600.00",
+        "source_revision2_target": "900.00",
+        "prior_payment_status": "not_paid"
+      },
+      "expected": {
+        "after_three_revision1_entries": {
+          "unique_parent_obligations": 1,
+          "total_leave_pay_target": "800.00",
+          "normal_wage_included": "600.00",
+          "additional_cash_target": "200.00"
+        },
+        "after_revision2_replacement": {
+          "total_leave_pay_target": "900.00",
+          "additional_cash_target": "300.00",
+          "additional_cash_net_delta_vs_revision1": "100.00"
+        },
+        "source_revision1_replay_after_revision2_cash_delta": "0.00",
+        "bank_instruction_created_solely_by_adoption": false
+      },
+      "must_reject_or_detect": [
+        "三个入口完整计2400",
+        "工资已含600仍额外发800",
+        "新目标900叠在旧800上",
+        "过时r1重放覆盖r2或倒扣100",
+        "仅凭姓名/日期相同自动关联父义务"
+      ],
+      "independent_oracle_reason": "采用目标是稳定父义务累计800→900；正常已覆盖600，所以追加200→300，净差100。身份别名已有受控证据这一前提不可省略。"
+    },
+    {
+      "case_id": "L-H18",
+      "title": "香港侍产假逐实际日判断40周给薪资格",
+      "classification": "verified_rule_with_fictional_facts",
+      "source_ids": [
+        "HK12"
+      ],
+      "input": {
+        "jurisdiction": "HK",
+        "actual_employer_id": "FAKE-HK-A",
+        "continuous_employment_start": "2026-01-05",
+        "continuous_contract_for_each_leave_day_verified": true,
+        "expected_birth_date": "2026-10-05",
+        "actual_birth_date": "2026-10-05",
+        "notice_of_intention_date": "2026-06-30",
+        "notice_of_actual_leave_dates": "2026-10-01",
+        "required_paternity_proof_verified_on": "2026-10-06",
+        "leave_dates": [
+          "2026-10-09",
+          "2026-10-13",
+          "2026-10-14",
+          "2026-10-15",
+          "2026-10-16"
+        ],
+        "adw_per_leave_block": "400.00",
+        "contractual_extra_pay": "0.00",
+        "currency": "HKD",
+        "statutory_notice_requirements_verified": true,
+        "required_documents_provided_before_first_leave": true,
+        "other_statutory_eligibility_verified": true,
+        "additional_contractual_pay_entitlement": "0.00"
+      },
+      "expected": {
+        "first_leave_day_service_elapsed_days": 277,
+        "later_leave_day_service_elapsed_days": [
+          281,
+          282,
+          283,
+          284
+        ],
+        "40_week_threshold_days_for_this_date_math": 280,
+        "leave_days_taken": "5",
+        "statutory_paid_paternity_leave_days": "4",
+        "statutory_paternity_pay_by_date": {
+          "2026-10-09": "0.00",
+          "2026-10-13": "320.00",
+          "2026-10-14": "320.00",
+          "2026-10-15": "320.00",
+          "2026-10-16": "320.00"
+        },
+        "statutory_paternity_pay_total": "1280.00",
+        "leave_right_on_first_day_removed_due_to_no_pay": false,
+        "first_day_retroactively_paid_when_40_weeks_reached": false
+      },
+      "must_reject_or_detect": [
+        "整批按首日不足40周全判无薪",
+        "后面达到40周就追补首日法定薪酬",
+        "把给薪不符合变成首日无休假权",
+        "把不同实际日/连续假块全部强制同一个历史ADW窗口"
+      ],
+      "independent_oracle_reason": "Jan5至Oct9为277日不足280日，Oct13起281日以上；逐实际日给薪资格，后4日各400×4/5=320。该例固定各块ADW相等仅为简化，不代表生产中始终相等。"
+    }
+  ],
+  "research_reference": "docs/design/advanced-leave-law.md",
+  "fixture_authoring_app_or_database_executed": false
+}

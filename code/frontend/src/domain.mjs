@@ -1,0 +1,99 @@
+export const array = v => Array.isArray(v) ? v : [];
+export const same = (a, b) => String(a ?? '') === String(b ?? '');
+export const date = value => value ? String(value).slice(0, 10) : '—';
+export const text = value => value === null || value === undefined || value === '' ? '—' : String(value);
+export const labels = { draft: '草稿', validated: '已校验', confirmed: '已确认', approved: '已启用', pending: '待核', active: '在用', inactive: '停用', ended: '已结束', cancelled: '已取消', source_snapshot: '来源快照', calculated: '系统试算', earning: '收入', deduction: '扣款', employee_contribution: '个人承担', employer_contribution: '企业承担', reference: '参考', CN: '中国内地', HK: '中国香港', full_time: '全职', part_time: '兼职', hourly: '小时工', outsourced: '外包服务' };
+export const label = value => labels[value] || text(value);
+
+// Preserve decimals and IDs from the server; never Number() salary amounts.
+export function amount(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value));
+  if (!match) return String(value);
+  return `${match[1]}${match[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${(match[3] || '').padEnd(2, '0')}`;
+}
+export function within(rows, id, root, parent = 'parent_company_id') {
+  if (!root) return true;
+  const seen = new Set(); let current = id;
+  while (current != null && !seen.has(String(current))) {
+    if (same(current, root)) return true; seen.add(String(current));
+    current = rows.find(row => same(row.id, current))?.[parent];
+  }
+  return false;
+}
+export function companiesInScope(data, scope) {
+  return array(data.companies).filter(company => within(array(data.companies), company.id, scope.company_id)
+    && within(array(data.ledgers), company.ledger_id, scope.ledger_id, 'parent_ledger_id'));
+}
+export function currentEmployment(e, today) { const from = date(e.hire_date), to = e.leave_date ? date(e.leave_date) : ''; return e.status !== 'cancelled' && from <= today && (!to || to >= today); }
+export function personRows(data, scope, today) {
+  const ids = new Set(companiesInScope(data, scope).map(c => String(c.id)));
+  return array(data.people).map(person => {
+    const relationships = array(data.employments).filter(e => same(e.person_id, person.id) && ids.has(String(e.company_id)));
+    const active = relationships.filter(e => currentEmployment(e, today));
+    const employmentIds = new Set(active.map(e => String(e.id)));
+    const assignments = array(data.assignments).filter(a => employmentIds.has(String(a.employment_id)) && date(a.valid_from) <= today && (!a.valid_to || today < date(a.valid_to)));
+    const names = (rows, key, source) => [...new Set(rows.map(row => array(data[source]).find(r => same(r.id, row[key]))?.name).filter(Boolean))].join(' / ');
+    return { ...person, relationships, active, assignments, company_names: names(active, 'company_id', 'companies'), department_names: names(assignments, 'department_id', 'departments'), position_names: names(assignments, 'position_id', 'positions'), employment_label: active.length ? '在职' : relationships.length ? '历史任职' : '待任职' };
+  }).filter(person => !scope.company_id && !scope.ledger_id || person.relationships.length > 0);
+}
+
+export function brandScope(data, groupId, brandId) {
+  if (!brandId) return { group_id: groupId, ledger_id: '', company_id: '', brand_id: '' };
+  const ledger = array(data.ledgers).find(l => same(l.brand_id, brandId) && l.scope_mode === 'brand');
+  const company = array(data.companies).find(c => same(c.brand_id, brandId) && c.org_level === 'brand');
+  if (!ledger && !company) throw new Error('此品牌尚未建立可办理的品牌公司或帐套，请先完善组织设置');
+  return { group_id: groupId, ledger_id: ledger?.id || '', company_id: company?.id || '', brand_id: brandId };
+}
+
+export function pageRows(rows, query, page, pageSize, searchText = row => Object.values(row).filter(v => typeof v !== 'object').join(' ')) {
+  const q = query.trim().toLocaleLowerCase();
+  const filtered = q ? rows.filter(row => searchText(row).toLocaleLowerCase().includes(q)) : rows;
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize)); const current = Math.max(1, Math.min(page, pages));
+  return { rows: filtered.slice((current - 1) * pageSize, current * pageSize), total: filtered.length, pages, page: current };
+}
+
+export function canRead(capabilities, resource) { return !!capabilities?.resources?.[resource]?.can_read; }
+export function canWrite(capabilities, resource) { return capabilities?.profile_code !== 'boss' && !!capabilities?.resources?.[resource]?.can_write; }
+export function canPayroll(capabilities) { return canRead(capabilities, 'payroll_run') && canRead(capabilities, 'payroll_slips_read_all') && !['config_admin', 'store_staff', 'station_staff', 'outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(capabilities?.profile_code); }
+export function canPeople(capabilities) { return ['people_read_all', 'people_self', 'employee_roster'].some(r => canRead(capabilities, r)); }
+
+export const navigation = [
+  { id: 'payroll', name: '薪酬管理', icon: 'wallet', pages: [
+    { id: 'payroll', name: '工资计算', subtitle: '批次、试算与核验', ready: true, access: canPayroll },
+    { id: 'payroll/rules', name: '工资项目与方案', subtitle: '查看现有规则版本', ready: true, access: canPayroll },
+    { id: 'payroll/payslips', name: '工资单', access: canPayroll },
+    { id: 'payroll/tax', name: '薪税与社保', access: canPayroll },
+  ] },
+  { id: 'attendance', name: '排班考勤', icon: 'calendar', pages: [
+    { id: 'attendance/schedule', name: '排班工作台', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/daily', name: '考勤日报', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/monthly', name: '考勤月报', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/leave', name: '假期台账', subtitle: '额度、申请与核销', ready: true, access: c => !['store_staff', 'station_staff', 'outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(c.profile_code) && canRead(c, 'advanced_leave_manage') },
+    { id: 'attendance/leave/settings', name: '假期设置', subtitle: '政策版本与规则发布', ready: true, access: c => !['store_staff', 'station_staff', 'outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(c.profile_code) && (canRead(c, 'advanced_leave_config') || canWrite(c, 'advanced_leave_config')) },
+    { id: 'my/leave', name: '我的假期', subtitle: '本人额度与请假申请', ready: true, access: c => canRead(c, 'advanced_leave_self') && !['outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(c.profile_code) },
+  ] },
+  { id: 'performance', name: '绩效管理', icon: 'chart', pages: [{ id: 'performance/plans', name: '考核计划', access: c => canRead(c, 'perf_cycle') }, { id: 'performance/bonus', name: '绩效与奖金', access: c => canRead(c, 'perf_cycle') }] },
+  { id: 'people', name: '人事管理', icon: 'people', pages: [
+    { id: 'organization', name: '人事组织架构', subtitle: '组织树与成员穿透', ready: true, access: c => canPeople(c) || canRead(c, 'ledger') },
+    { id: 'people', name: '人事花名册', subtitle: '永久编号与任职历史', ready: true, access: canPeople },
+    { id: 'people/changes', name: '入转调离', access: c => canRead(c, 'employment_manage') },
+    { id: 'people/contracts', name: '人事合同', access: c => canRead(c, 'employment_manage') },
+    { id: 'people/certificates', name: '证件证照', access: canPeople },
+    { id: 'people/items', name: '物品领用', access: canPeople },
+  ] },
+  { id: 'talent', name: '招聘与培训', icon: 'book', pages: [{ id: 'talent/recruit', name: '招聘管理', access: c => canRead(c, 'requisition') }, { id: 'talent/learning', name: '培训与考试', access: c => canRead(c, 'training_manage') }] },
+  { id: 'services', name: '用工与服务', icon: 'building', pages: [{ id: 'services/vendors', name: '供应商与用工', access: c => canRead(c, 'outsource_ops') }, { id: 'services/dormitory', name: '宿舍管理', access: canPeople }] },
+  { id: 'reports', name: '数据报表', icon: 'chart', pages: [{ id: 'reports/cost', name: '人力成本', access: c => canRead(c, 'report') }] },
+  { id: 'system', name: '系统设置', icon: 'settings', bottom: true, pages: [{ id: 'system/access', name: '操作人员与权限', access: c => canWrite(c, 'ledger') && !['group_hr_director', 'company_hr_director'].includes(c.profile_code) }, { id: 'system/workflow', name: '表单与审批设计', access: c => canWrite(c, 'ledger') && !['group_hr_director', 'company_hr_director'].includes(c.profile_code) }] },
+  { id: 'integrations', name: '集成设置', icon: 'link', bottom: true, pages: [{ id: 'integrations/connections', name: '连接与接口对账', access: c => canWrite(c, 'ledger') && !['group_hr_director', 'company_hr_director'].includes(c.profile_code) }] },
+];
+export function visibleNavigation(capabilities) { return navigation.map(group => ({ ...group, pages: group.pages.filter(p => p.access(capabilities)) })).filter(group => group.pages.length); }
+export function routePage(route) { return navigation.flatMap(group => group.pages).find(page => route === page.id) || (route.startsWith('people/detail/') ? { id: 'people', name: '员工全貌', ready: true, access: canPeople } : route.startsWith('payroll/batch/') ? { id: 'payroll', name: '工资批次', ready: true, access: canPayroll } : null); }
+
+// Code alone is not a policy identity: CN/HK and unit scopes may share it.
+export function leaveAccountName(account, schemes) {
+  if (account.scheme_name) return account.scheme_name;
+  const names = [...new Set(array(schemes).filter(s => s.code === account.code && s.jurisdiction === account.jurisdiction && s.unit === account.unit && (!s.group_id || same(s.group_id, account.group_id))).map(s => s.name).filter(Boolean))];
+  return names.length === 1 ? names[0] : account.code;
+}

@@ -192,7 +192,7 @@ const reqIp = (req) => {
   return xff || req.socket?.remoteAddress || null;
 };
 
-export async function createApp() {
+export async function createApp({ apiExtension = null, skipDemoSeed = false } = {}) {
   // ★ 数据目录：默认在内存里（每次启动都是干净库，适合演示与测试）。
   //   设了 PGLITE_DATA_DIR 就持久化到磁盘 —— 否则**重启即丢整个库**，
   //   而那比"会话丢"严重得多：丢的是全部考勤与工资条。
@@ -277,7 +277,7 @@ export async function createApp() {
   // ★ 控制库永远不灌演示种子：它的职责只有"登记有哪些帐套"。
   //   往控制库里灌 10 家店与 20 个人，会让"这套系统的业务数据在哪"变成一个
   //   没人能一句话回答的问题。
-  const skipSeed = process.env.SEED_SKIP === '1' || !!process.env.CONTROL_URL;
+  const skipSeed = skipDemoSeed || process.env.SEED_SKIP === '1' || !!process.env.CONTROL_URL;
   if (fresh && skipSeed) {
     await db.exec(`INSERT INTO sys_data_scope(id,name,combinator) VALUES (1,'全集团','intersection')`);
   } else if (fresh) {
@@ -1041,6 +1041,12 @@ export async function createApp() {
           error: 'E_PWD_CHANGE_REQUIRED',
           message: '该账号必须先修改口令（POST /api/me/password）',
         });
+      }
+
+      // Versioned domains perform their own current action/scope/field guards.
+      // Their trusted actor is derived above, never from request JSON.
+      if (apiExtension && url.pathname.startsWith('/api/v2/')) {
+        if (await apiExtension({ req, res, url, userId: uid, db, readBody, runRead, runWrite })) return;
       }
 
       // Persona restrictions are resolved from the authenticated database account.
@@ -2471,8 +2477,16 @@ export async function createApp() {
       if (req.method === 'POST' && url.pathname === '/api/me/password') {
         // @no-runWrite: 失败计数必须先提交再抛错（同 /login）。走 runWrite 会把
         // "又错了一次"随回滚抹掉，于是改密接口成了不需要锁定的口令试错通道。
-        const oldPwd = url.searchParams.get('old');
-        const newPwd = url.searchParams.get('new');
+        let passwordInput = null;
+        if (String(req.headers['content-type'] || '').includes('application/json')) {
+          try { passwordInput = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8')); }
+          catch { throw bizErr('E_TY_ARGUMENT', '改密请求须为JSON对象'); }
+          if (!passwordInput || typeof passwordInput !== 'object' || Array.isArray(passwordInput)) throw bizErr('E_TY_ARGUMENT', '改密请求须为JSON对象');
+        }
+        // JSON avoids credentials in URLs; query parameters are retained only
+        // for the existing client compatibility path during migration.
+        const oldPwd = passwordInput ? (passwordInput.oldPassword ?? passwordInput.old) : url.searchParams.get('old');
+        const newPwd = passwordInput ? (passwordInput.newPassword ?? passwordInput.new) : url.searchParams.get('new');
         let out;
         try {
           out = await withTx(db, (tx) => authn.changePassword(tx,

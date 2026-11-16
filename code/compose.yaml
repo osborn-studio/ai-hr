@@ -1,34 +1,24 @@
-# ============================================================================
-# compose.yaml · 一条命令起来（⚠️ 未在本机验证：本机无 Docker）
-# ----------------------------------------------------------------------------
-#   cd code && docker compose up --build
-#   open http://127.0.0.1:8787        # 演示口令 demo1234
-#
-# 注意三件事：
-#   1. 数据库在容器内的 /data（PGlite 是进程内引擎），必须挂卷，否则重启丢库。
-#   2. 没有配 TLS。放在公网前必须加反代（Caddy/Nginx）+ HTTPS，并换掉演示口令。
-#   3. 单实例。要扩多副本，先把 PGlite 换成真 PostgreSQL（README「仍未实现」）。
-# ============================================================================
+# One Node app process, external PostgreSQL or a qualified domain Broker.
 services:
   app:
     build: .
     image: ty-hr:local
     ports:
-      - "127.0.0.1:8787:8787"     # 只绑回环：默认不给公网
+      - "127.0.0.1:8787:8787"
     environment:
+      NODE_ENV: production
       PORT: "8787"
       HOST: "0.0.0.0"
-      PGLITE_DATA_DIR: "/data"
-    volumes:
-      - aihr-data:/data
+      TYHR_DATA_MODE: "${TYHR_DATA_MODE:-postgres}"
+      DATABASE_URL: "${DATABASE_URL:-}"
+      TYHR_BROKER_CAPABILITIES_URL: "${TYHR_BROKER_CAPABILITIES_URL:-}"
+      TYHR_BROKER_QUERY_URL: "${TYHR_BROKER_QUERY_URL:-}"
+      TYHR_BROKER_COMMAND_URL: "${TYHR_BROKER_COMMAND_URL:-}"
+      TYHR_BROKER_TOKEN: "${TYHR_BROKER_TOKEN:-}"
     restart: unless-stopped
-    # 探针用 /livez（免认证）。用 /api/health 会永远 unhealthy —— 它要 token。
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/livez').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       start_period: 25s
       retries: 3
-
-volumes:
-  aihr-data:
