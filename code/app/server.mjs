@@ -108,7 +108,7 @@ import * as testWorkspace from './services/test-workspace.mjs';
 import * as hkTools from './services/hk-tools.mjs';
 import * as customerPayroll from './services/customer-payroll.mjs';
 import * as customerPerformance from './services/customer-performance.mjs';
-import { authorizePersonaRequest } from './services/persona-guard.mjs';
+import { authorizePersonaRequest, authorizeManagedLegacyRequest, personaFor } from './services/persona-guard.mjs';
 import * as employeeSelf from './services/employee-self.mjs';
 import { prepareRead, requireOrg, requireSession } from './services/guard.mjs';
 import { createLedgerRegistry } from './registry.mjs';
@@ -1045,11 +1045,12 @@ export async function createApp({ apiExtension = null, skipDemoSeed = false } = 
 
       // Versioned domains perform their own current action/scope/field guards.
       // Their trusted actor is derived above, never from request JSON.
-      if (apiExtension && url.pathname.startsWith('/api/v2/')) {
+      if (apiExtension && (url.pathname.startsWith('/api/v2/') || req.method==='GET'&&url.pathname==='/api/foundation/bootstrap')) {
         if (await apiExtension({ req, res, url, userId: uid, db, readBody, runRead, runWrite })) return;
       }
 
       // Persona restrictions are resolved from the authenticated database account.
+      await withTx(db,tx=>authorizeManagedLegacyRequest(tx,{userId:uid,pathname:url.pathname}));
       await withTx(db,tx=>authorizePersonaRequest(tx,{userId:uid,pathname:url.pathname,method:req.method}));
 
       if(url.pathname.startsWith('/api/hk-tools/')&&req.method==='POST'){
@@ -2730,8 +2731,19 @@ export async function createApp({ apiExtension = null, skipDemoSeed = false } = 
             fn_role_can($1,resource_code,'read') AS can_read,
             fn_role_can($1,resource_code,'write') AS can_write
             FROM sys_perm_resource ORDER BY resource_code`,[uid])).rows;
-          const hasProfiles=(await tx.query("SELECT to_regclass('public.ty_test_account_profile') IS NOT NULL ok")).rows[0].ok;
-          const profile=hasProfiles?(await tx.query('SELECT profile_code,person_id FROM ty_test_account_profile WHERE account_id=$1',[uid])).rows[0]:null;
+          const profile=await personaFor(tx,uid);
+          if((await tx.query("SELECT to_regclass('public.ty_auth_managed') IS NOT NULL ok")).rows[0].ok&&(await(await import('./services/platform-adapters.mjs')).isManagedAccount(tx,uid))){
+            const native=await import('./services/platform-core.mjs');
+            const nativeResources=new Set((await tx.query('SELECT DISTINCT resource FROM ty_auth_managed WHERE account_id=$1',[uid])).rows.map(r=>r.resource));
+            const groups=(await tx.query('SELECT DISTINCT group_id FROM ty_access_grant WHERE account_id=$1 UNION SELECT $2::bigint WHERE $2::bigint IS NOT NULL',[uid,profile?.group_id||null])).rows;
+            const targets=(await tx.query('SELECT id,group_id FROM ty_company WHERE group_id=ANY($1::bigint[])',[groups.map(g=>g.group_id)])).rows;
+            for(const r of rows){const possible=r.can_read||r.can_write||nativeResources.has(r.resource_code);r.can_read=false;r.can_write=false;if(!possible)continue;for(const g of groups){for(const company of [null,...targets.filter(c=>String(c.group_id)===String(g.group_id)).map(c=>c.id)]){
+              const base={userId:uid,resource:r.resource_code,groupId:g.group_id,companyId:company,personId:profile?.person_id};
+              if(!r.can_read)r.can_read=(await native.authorization(tx,{...base,action:'read'})).allowed;
+              if(!r.can_write)r.can_write=(await native.authorization(tx,{...base,action:'write'})).allowed;
+              if(r.can_read&&r.can_write)break;
+            }if(r.can_read&&r.can_write)break;}}
+          }
           const person=(await tx.query('SELECT person_id FROM sys_account WHERE id=$1',[uid])).rows[0]?.person_id;
           return {resources:Object.fromEntries(rows.map(r=>[r.resource_code,{can_read:r.can_read,can_write:r.can_write}])),
             profile_code:profile?.profile_code||null,has_person:!!person,has_outsource:profile?.profile_code==='outsourced_staff'||(profile?.person_id&&(await tx.query("SELECT to_regclass('public.ty_outsource_engagement')IS NOT NULL ok")).rows[0].ok?!!(await tx.query('SELECT EXISTS(SELECT 1 FROM ty_outsource_engagement WHERE person_id=$1)ok',[profile.person_id])).rows[0].ok:false)};

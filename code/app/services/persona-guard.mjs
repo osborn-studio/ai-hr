@@ -1,14 +1,31 @@
-// Demonstration personas are stored in the database. Query parameters and UI
+// Operator identities are stored in the database. Query parameters and UI
 // labels never change a user's role, employee binding or allowed actions.
 import { bizErr } from '../errors.mjs';
 import { requireSession } from './guard.mjs';
 import { inStationScope } from './scope.mjs';
 
 export async function personaFor(tx,userId) {
+  if((await tx.query("SELECT to_regclass('public.ty_operator_binding') IS NOT NULL ok")).rows[0].ok){
+    const operator=(await tx.query(`SELECT b.*,a.person_id AS legacy_person_id
+      FROM ty_operator_binding b JOIN sys_account a ON a.id=b.account_id
+      WHERE b.account_id=$1 AND b.status='active' AND a.status='active'`,[userId])).rows[0];
+    if(operator)return operator;
+  }
   if(!(await tx.query("SELECT to_regclass('public.ty_test_account_profile') IS NOT NULL ok")).rows[0].ok)return null;
   return (await tx.query(`SELECT p.*,a.person_id AS legacy_person_id
     FROM ty_test_account_profile p JOIN sys_account a ON a.id=p.account_id
     WHERE p.account_id=$1`,[userId])).rows[0]||null;
+}
+
+// The older endpoints combine coarse resource and data scopes independently.
+// Accounts configured with complete native grants use the versioned endpoints,
+// whose guards keep action, company, person and fields in the same grant.
+export async function authorizeManagedLegacyRequest(tx,{userId,pathname}) {
+  if(pathname.startsWith('/api/me')||pathname.startsWith('/api/v2/'))return;
+  if(!(await tx.query("SELECT to_regclass('public.ty_auth_managed') IS NOT NULL ok")).rows[0].ok)return;
+  const managed=(await tx.query(`SELECT EXISTS(SELECT 1 FROM ty_auth_managed WHERE account_id=$1)
+    OR EXISTS(SELECT 1 FROM ty_access_grant WHERE account_id=$1 AND platform_source_key IS NOT NULL)ok`,[userId])).rows[0].ok;
+  if(managed)throw bizErr('E_TY_FORBIDDEN','当前账号已使用完整授权，请通过新版业务入口操作；此接口尚未支持同一授权内的字段和数据范围');
 }
 const denied=message=>{throw bizErr('E_RESOURCE_FORBIDDEN',message);};
 const staff=new Set(['store_staff','station_staff','outsourced_staff']);

@@ -27,8 +27,11 @@ export const RESOURCES = ['ledger'];
 
 export async function accessFor(tx, userId) {
   const admin = !!(await tx.query("SELECT fn_role_can($1,'ledger','write') ok",[userId])).rows[0].ok;
+  const hasBusinessTimezone=(await tx.query("SELECT to_regprocedure('public.app_tz()') IS NOT NULL ok")).rows[0].ok;
+  const timezone=hasBusinessTimezone?(await tx.query('SELECT app_tz() tz')).rows[0].tz:'Asia/Shanghai';
   const grants = (await tx.query(`SELECT * FROM ty_access_grant WHERE account_id=$1 AND can_read
-    AND valid_from<=current_date AND (valid_to IS NULL OR current_date<valid_to)`,[userId])).rows;
+    AND valid_from<=(clock_timestamp() AT TIME ZONE $2)::date
+    AND (valid_to IS NULL OR (clock_timestamp() AT TIME ZONE $2)::date<valid_to)`,[userId,timezone])).rows;
   const persona=await personaFor(tx,userId);
   const platformAdmin=admin&&persona?.profile_code!=='group_hr_director';
   const companyTree=(await tx.query(`SELECT c.id,(to_jsonb(c)->>'parent_company_id')::bigint parent_company_id FROM ty_company c`)).rows;

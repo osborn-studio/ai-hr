@@ -1,0 +1,62 @@
+import React, { useRef, useState } from 'react';
+import { Button, Icon, Notice, Tabs } from '../UI.jsx';
+import { clone, connectNode, graphEdges, list, mergePageSelection, newKey, NODE_TYPES, removeNode, validateWorkflow } from '../../platform-model.mjs';
+
+const nodeWidth = 166, nodeHeight = 64;
+export default function WorkflowDesigner({ value, onChange, operators = [], roles = [], fields = [], readOnly = false, onPreview, preview, previewBusy = false }) {
+  const [selectedId, setSelected] = useState(value.nodes[0]?.id || '');
+  const [connectFrom, setConnectFrom] = useState(null); const [branchIndex, setBranchIndex] = useState(0);
+  const [tab, setTab] = useState('properties'); const [error, setError] = useState(''); const drag = useRef(null); const canvas = useRef(null);
+  const selected = value.nodes.find(n => n.id === selectedId); const edges = graphEdges(value);
+  const width = Math.max(900, ...value.nodes.map(n => n.x + 220)), height = Math.max(430, ...value.nodes.map(n => n.y + 130));
+  const change = patch => { if (!readOnly && selected) onChange({ ...value, nodes: value.nodes.map(n => n.id === selected.id ? { ...n, ...patch } : n) }); };
+  const choose = node => {
+    if (connectFrom) { try { onChange(connectNode(value, connectFrom.id, node.id, connectFrom.branchIndex)); setConnectFrom(null); setError(''); } catch (error) { setError(error.message); } }
+    setSelected(node.id);
+  };
+  const add = type => {
+    const id = newKey('node'), index = value.nodes.length;
+    const node = { id, type, label: NODE_TYPES.find(([key]) => key === type)[1], x: 80 + index % 4 * 210, y: 80 + Math.floor(index / 4) * 120 };
+    if (type === 'approval') Object.assign(node, { mode: 'any', approver_ids: [], role_codes: [] });
+    if (type === 'condition') node.branches = [{ when: { field: '', op: 'eq', value: '' }, next: '' }, { else: true, next: '' }];
+    onChange({ ...value, nodes: [...value.nodes, node] }); setSelected(id);
+  };
+  const startDrag = (event, node) => {
+    if (readOnly || connectFrom || event.button !== 0) return; event.preventDefault();
+    const rect = canvas.current.getBoundingClientRect(); drag.current = { id: node.id, pointerId: event.pointerId, initialX: event.clientX, initialY: event.clientY, x: node.x, y: node.y, scaleX: width / rect.width, scaleY: height / rect.height };
+    event.currentTarget.setPointerCapture(event.pointerId); setSelected(node.id);
+  };
+  const move = event => {
+    const state = drag.current; if (!state || state.pointerId !== event.pointerId) return;
+    const x = Math.round(Math.max(12, state.x + (event.clientX - state.initialX) * state.scaleX));
+    const y = Math.round(Math.max(12, state.y + (event.clientY - state.initialY) * state.scaleY));
+    onChange({ ...value, nodes: value.nodes.map(n => n.id === state.id ? { ...n, x, y } : n) });
+  };
+  const stopDrag = event => { if (drag.current?.pointerId === event.pointerId) drag.current = null; };
+  const branchChange = (index, patch) => change({ branches: list(selected.branches).map((b, i) => i === index ? { ...b, ...patch } : b) });
+  const errors = validateWorkflow(value);
+  return <div className="workflow-designer">
+    <div className="designer-mobile-notice"><Notice>手机可查看流程及办理审批。拖拽、连线和发布请使用PC。</Notice></div>
+    <div className="designer-toolbar"><div className="row-actions">{NODE_TYPES.map(([type, label]) => <Button key={type} disabled={readOnly || ['start', 'end'].includes(type) && value.nodes.some(n => n.type === type)} onClick={() => add(type)}>＋ {label}</Button>)}</div><span className="subtle">拖动节点调整位置；选择节点后可连线。</span></div>
+    {connectFrom && <Notice>正在从“{value.nodes.find(n => n.id === connectFrom.id)?.label}”连线，请点目标节点。<Button onClick={() => setConnectFrom(null)}>取消连线</Button></Notice>}
+    {error && <Notice tone="danger">{error}</Notice>}
+    <div className="designer-layout"><div className="workflow-canvas-scroll"><svg ref={canvas} className="workflow-canvas" width={width} height={height} viewBox={'0 0 ' + width + ' ' + height} aria-label="审批流程画布" role="group">
+      <defs><pattern id="workflow-grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#dae5f5"/></pattern><marker id="workflow-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7" fill="#7e9cc6"/></marker></defs>
+      <rect width="100%" height="100%" fill="url(#workflow-grid)"/>
+      {edges.map((edge, i) => { const from = value.nodes.find(n => n.id === edge.from), to = value.nodes.find(n => n.id === edge.to); if (!from || !to) return null; const sx = from.x + nodeWidth, sy = from.y + nodeHeight / 2, ex = to.x, ey = to.y + nodeHeight / 2, mid = Math.max(40, Math.abs(ex - sx) / 2); return <g key={edge.from + '-' + i} className="workflow-edge"><path d={'M' + sx + ',' + sy + ' C' + (sx + mid) + ',' + sy + ' ' + (ex - mid) + ',' + ey + ' ' + ex + ',' + ey} fill="none" stroke="#8ca9cf" strokeWidth="2" markerEnd="url(#workflow-arrow)"/>{edge.label && <text x={(sx + ex) / 2} y={(sy + ey) / 2 - 8}>{edge.label.slice(0, 26)}</text>}</g>; })}
+      {value.nodes.map(node => <g key={node.id} role="button" tabIndex={0} aria-label={node.label + '节点'} aria-pressed={node.id === selectedId} className={'workflow-node ' + node.type + (node.id === selectedId ? ' selected' : '')} transform={'translate(' + node.x + ',' + node.y + ')'} onPointerDown={event => startDrag(event, node)} onPointerMove={move} onPointerUp={stopDrag} onPointerCancel={stopDrag} onClick={() => choose(node)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(node); } if (!readOnly && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); onChange({ ...value, nodes: value.nodes.map(n => n.id === node.id ? { ...n, x: Math.max(12, n.x + (event.key === 'ArrowRight' ? 10 : event.key === 'ArrowLeft' ? -10 : 0)), y: Math.max(12, n.y + (event.key === 'ArrowDown' ? 10 : event.key === 'ArrowUp' ? -10 : 0)) } : n) }); } }}>
+        <rect width={nodeWidth} height={nodeHeight} rx="10"/><rect className="node-accent" width="5" height={nodeHeight - 20} x="0" y="10" rx="2"/>
+        <text x="16" y="26" className="node-title">{node.label.slice(0, 13)}</text><text x="16" y="46" className="node-kind">{NODE_TYPES.find(([type]) => type === node.type)?.[1]}{node.type === 'approval' ? node.mode === 'all' ? ' · 会签' : ' · 或签' : ''}</text>
+      </g>)}
+    </svg></div><aside className="node-properties"><Tabs value={tab} onChange={setTab} items={[{ id: 'properties', label: '节点属性' }, { id: 'check', label: '校验与仿真' }]}/><div className="padded compact">
+      {tab === 'check' ? <>{errors.length ? <Notice tone="warning">{errors.map(message => <p key={message}>{message}</p>)}</Notice> : <Notice>本地结构检查通过；发布仍由服务端验证实际权限与人员规则。</Notice>}<Button disabled={!onPreview} busy={previewBusy} onClick={onPreview}>使用测试表单仿真</Button>{preview && <div className="preview-trace"><h3>路由仿真结果</h3><Notice tone={preview.valid ? 'info' : 'warning'}>{preview.valid ? '仿真校验通过' : '仿真校验受阻'}</Notice><p className="subtle">只读推演，不创建待办或审批实例。</p>{list(preview.issues).map((issue, i) => <Notice tone="warning" key={i}>{typeof issue === 'string' ? issue : issue.message || issue.code}</Notice>)}{list(preview.path).map((step, i) => <div key={step.node_id || i}><b>{typeof step === 'string' ? step : step.label || step.node_id}</b><span>{typeof step === 'string' ? '' : step.reason || step.result || '已匹配'}</span>{list(typeof step === 'string' ? [] : step.approvers).map(person => <small key={person.id}>{person.name || person.login}</small>)}</div>)}<h3>解析的审批人员</h3>{list(preview.resolved_approvers).map((entry, i) => <div key={entry.node_id || i}><b>{entry.label || value.nodes.find(n => n.id === entry.node_id)?.label || entry.node_id}</b><small>{list(entry.approver_ids || entry.account_ids).map(id => operators.find(operator => String(operator.id) === String(id))?.name || '#' + id).join('、') || entry.reason || '无已返回人员'}</small></div>)}</div>}</> : selected ? <fieldset disabled={readOnly}><label>节点名称<input aria-label="节点名称" value={selected.label} onChange={event => change({ label: event.target.value })}/></label><p className="subtle">{NODE_TYPES.find(([type]) => type === selected.type)?.[1]}</p>
+        {['approval', 'notify'].includes(selected.type) && <><label>指定人员<select aria-label="指定人员" multiple size={5} value={list(selected.approver_ids).map(String)} onChange={event => change({ approver_ids: mergePageSelection(selected.approver_ids, operators, [...event.target.selectedOptions].map(o => o.value)) })}>{operators.map(operator => <option key={operator.id} value={String(operator.id)}>{operator.name || operator.login}</option>)}</select></label><label>按角色选人<select aria-label="按角色选人" multiple size={4} value={list(selected.role_codes)} onChange={event => change({ role_codes: [...event.target.selectedOptions].map(o => o.value) })}>{roles.map(role => <option key={role.code} value={role.code}>{role.name || role.code}</option>)}</select></label><small>具体人员范围及无审批人情形由服务端按实例核定。</small></>}
+        {selected.type === 'approval' && <label>多人处理方式<select aria-label="多人处理方式" value={selected.mode || 'any'} onChange={event => change({ mode: event.target.value })}><option value="any">或签：一人同意</option><option value="all">会签：全部同意</option></select></label>}
+        {selected.type === 'condition' && <div className="branch-list">{list(selected.branches).map((branch, index) => <div className="branch-editor" key={index}><label className="checkbox"><input type="radio" name="active-branch" checked={branchIndex === index} onChange={() => setBranchIndex(index)}/>{branch.else ? '兜底分支' : '条件 ' + (index + 1)}</label>{!branch.else && <><label>表单字段<select aria-label="表单字段" value={branch.when?.field || ''} onChange={event => branchChange(index, { when: { ...branch.when, field: event.target.value } })}><option value="">请选择</option>{fields.map(field => <option key={field.key} value={field.key}>{field.label}</option>)}</select></label><label>判断方式<select aria-label="判断方式" value={branch.when?.op || 'eq'} onChange={event => branchChange(index, { when: { ...branch.when, op: event.target.value } })}><option value="eq">等于</option><option value="gt">大于</option><option value="gte">大于或等于</option><option value="in">属于选项组</option></select></label><label>条件值<input value={Array.isArray(branch.when?.value) ? branch.when.value.join(',') : branch.when?.value ?? ''} onChange={event => branchChange(index, { when: { ...branch.when, value: branch.when?.op === 'in' ? event.target.value.split(',').map(v => v.trim()).filter(Boolean) : event.target.value } })}/></label></>}<small>流向：{value.nodes.find(n => n.id === branch.next)?.label || '尚未连接'}</small>{!branch.else && <Button onClick={() => change({ branches: selected.branches.filter((_, i) => i !== index) })}>删除此条件</Button>}</div>)}<Button onClick={() => change({ branches: [...list(selected.branches).filter(b => !b.else), { when: { field: '', op: 'eq', value: '' }, next: '' }, ...list(selected.branches).filter(b => b.else)] })}>添加条件</Button></div>}
+        {selected.type !== 'end' && <Button onClick={() => setConnectFrom({ id: selected.id, branchIndex: selected.type === 'condition' ? branchIndex : undefined })}><Icon name="link" size={16}/>连接{selected.type === 'condition' ? '所选分支' : '下一节点'}</Button>}
+        {selected.type !== 'condition' && selected.type !== 'end' && <label>下一节点<select aria-label="下一节点" value={selected.next || ''} onChange={event => change({ next: event.target.value })}><option value="">未连接</option>{value.nodes.filter(n => n.id !== selected.id && n.type !== 'start').map(n => <option key={n.id} value={n.id}>{n.label}</option>)}</select></label>}
+        {!['start', 'end'].includes(selected.type) && <Button onClick={() => { onChange(removeNode(value, selected.id)); setSelected(value.nodes.find(n => n.id !== selected.id)?.id || ''); }}>删除节点及关联连线</Button>}
+      </fieldset> : <Notice>选择画布上的节点查看属性。</Notice>}
+    </div></aside></div>
+  </div>;
+}

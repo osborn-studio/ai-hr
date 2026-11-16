@@ -17,7 +17,7 @@ const rejects=async(name,fn,code)=>{await assert.rejects(fn,e=>!code||e.code===c
 const rules={quantity_basis:'calendar',calendar_status:'verified',calendar_valid_from:'2026-01-01',calendar_valid_to:'2027-01-01',calendar_version:'SYNTHETIC-CN-2026',rest_dates:[],holiday_dates:['2026-10-01','2026-10-02','2026-10-03'],step:'0.5',max_quantity:'10',legal_rule_ref:'CN-ANNUAL-20080918',legal_review_ref:'SYNTHETIC-review',expiry_action:'legal_review',proration_denominator:365,proration_rounding:'floor',required_qualification_facts:['continuous_work_12_months']};
 try{
  await db.exec(readFileSync(new URL('../db/193_tyhr_foundation.sql',import.meta.url),'utf8'));
- await db.exec(`CREATE TABLE sys_perm_resource(resource_code varchar(64) PRIMARY KEY,label text);CREATE TABLE sys_account(id bigint PRIMARY KEY,person_id bigint);CREATE TABLE ty_test_account_profile(account_id bigint PRIMARY KEY,group_id bigint,person_id bigint,company_id bigint,profile_code text);
+ await db.exec(`CREATE FUNCTION app_tz()RETURNS text LANGUAGE sql AS $$SELECT 'Asia/Shanghai'::text$$;CREATE TABLE sys_perm_resource(resource_code varchar(64) PRIMARY KEY,label text);CREATE TABLE sys_account(id bigint PRIMARY KEY,person_id bigint);CREATE TABLE ty_test_account_profile(account_id bigint PRIMARY KEY,group_id bigint,person_id bigint,company_id bigint,profile_code text);
  CREATE TABLE test_capability(user_id bigint,resource text,can_read boolean,can_write boolean);
  CREATE FUNCTION fn_role_can(bigint,text,text) RETURNS boolean LANGUAGE sql AS $$SELECT EXISTS(SELECT 1 FROM test_capability WHERE user_id=$1 AND resource=$2 AND CASE WHEN $3='write' THEN can_write ELSE can_read END)$$;
  CREATE TABLE ty_roster_period(id bigint PRIMARY KEY,status text);

@@ -58,6 +58,10 @@ export function canWrite(capabilities, resource) { return capabilities?.profile_
 export function canPayroll(capabilities) { return canRead(capabilities, 'payroll_run') && canRead(capabilities, 'payroll_slips_read_all') && !['config_admin', 'store_staff', 'station_staff', 'outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(capabilities?.profile_code); }
 export function canPeople(capabilities) { return ['people_read_all', 'people_self', 'employee_roster'].some(r => canRead(capabilities, r)); }
 
+// Menu visibility is only a hint; every platform query/command rechecks complete grants.
+export function canConfigureResource(c, resource) { return canRead(c, resource) || c.profile_code === 'config_admin' && canWrite(c, 'ledger'); }
+export function canUsePortal(c) { return c.profile_code !== 'config_admin' && canRead(c, 'workflow_self'); }
+
 export const navigation = [
   { id: 'payroll', name: '薪酬管理', icon: 'wallet', pages: [
     { id: 'payroll', name: '工资计算', subtitle: '批次、试算与核验', ready: true, access: canPayroll },
@@ -85,8 +89,17 @@ export const navigation = [
   { id: 'talent', name: '招聘与培训', icon: 'book', pages: [{ id: 'talent/recruit', name: '招聘管理', access: c => canRead(c, 'requisition') }, { id: 'talent/learning', name: '培训与考试', access: c => canRead(c, 'training_manage') }] },
   { id: 'services', name: '用工与服务', icon: 'building', pages: [{ id: 'services/vendors', name: '供应商与用工', access: c => canRead(c, 'outsource_ops') }, { id: 'services/dormitory', name: '宿舍管理', access: canPeople }] },
   { id: 'reports', name: '数据报表', icon: 'chart', pages: [{ id: 'reports/cost', name: '人力成本', access: c => canRead(c, 'report') }] },
-  { id: 'system', name: '系统设置', icon: 'settings', bottom: true, pages: [{ id: 'system/access', name: '操作人员与权限', access: c => canWrite(c, 'ledger') && !['group_hr_director', 'company_hr_director'].includes(c.profile_code) }, { id: 'system/workflow', name: '表单与审批设计', access: c => canWrite(c, 'ledger') && !['group_hr_director', 'company_hr_director'].includes(c.profile_code) }] },
-  { id: 'integrations', name: '集成设置', icon: 'link', bottom: true, pages: [{ id: 'integrations/connections', name: '连接与接口对账', access: c => canWrite(c, 'ledger') && !['group_hr_director', 'company_hr_director'].includes(c.profile_code) }] },
+  { id: 'personal', name: '我的办理', icon: 'home', bottom: true, pages: [
+    { id: 'my/tasks', name: '我的待办', subtitle: '当前分配任务与办理', ready: true, access: canUsePortal },
+    { id: 'my/requests', name: '我的申请', subtitle: '发起表单与办理进度', ready: true, access: canUsePortal },
+    { id: 'my/alerts', name: '提醒通知', subtitle: '提醒与投递状态', ready: true, access: canUsePortal },
+  ] },
+  { id: 'system', name: '系统设置', icon: 'settings', bottom: true, pages: [
+    { id: 'system/access', name: '操作人员与权限', subtitle: '角色、完整授权与模拟', ready: true, access: c => canConfigureResource(c, 'system_configuration') },
+    { id: 'system/forms', name: '表单设计', subtitle: '字段、预览与版本发布', ready: true, access: c => canConfigureResource(c, 'workflow_manage') },
+    { id: 'system/workflow', name: '审批流设计', subtitle: '可视流程、仿真与办理', ready: true, access: c => canConfigureResource(c, 'workflow_manage') },
+  ] },
+  { id: 'integrations', name: '集成设置', icon: 'link', bottom: true, pages: [{ id: 'integrations/connections', name: '连接与接口对账', subtitle: '连接、组织对照与回传日志', ready: true, access: c => canConfigureResource(c, 'integration_manage') }] },
 ];
 export function visibleNavigation(capabilities) { return navigation.map(group => ({ ...group, pages: group.pages.filter(p => p.access(capabilities)) })).filter(group => group.pages.length); }
 export function routePage(route) { return navigation.flatMap(group => group.pages).find(page => route === page.id) || (route.startsWith('people/detail/') ? { id: 'people', name: '员工全貌', ready: true, access: canPeople } : route.startsWith('payroll/batch/') ? { id: 'payroll', name: '工资批次', ready: true, access: canPayroll } : null); }
