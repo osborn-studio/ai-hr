@@ -3,6 +3,7 @@
 // posting is produced here: confirmed monetary sources await the adoption bridge.
 import {createHash} from 'node:crypto';
 import {bizErr} from '../errors.mjs';
+import {sameHuman,humanIsPerson} from './human-identity.mjs';
 import * as core from './advanced-leave.mjs';
 import {exactDecimal,exactFraction,decimalAdd,decimalSubtract,compareDecimal,cumulativeGrant,cnAnnualBand,cnAnnualProration,hkAnnualDays,hkAnnualCashChoice,hkADW,multiShiftMinutes} from '../leave-calculations.mjs';
 export const RESOURCES=['advanced_leave_manage','advanced_leave_approve','advanced_leave_payroll','advanced_leave_self'];
@@ -123,7 +124,7 @@ export async function assertProposalApprovalAccess(t,{userId,id}){
 export async function approveProposal(t,{userId,id,approve=true,reason}){
  const first=await one(t,'SELECT * FROM ty_leave_lifecycle_proposal WHERE id=$1',[id]);if(!first)bad('待办不存在');const a=await assertProposalApprovalAccess(t,{userId,id}),p=await one(t,'SELECT * FROM ty_leave_lifecycle_proposal WHERE id=$1 FOR UPDATE',[id]);
  const requirement=await workflowRequirement(t,a,userId,p.kind);if(p.approval_route==='workflow'||requirement.required)throw bizErr('E_LEAVE_USE_APPROVAL','此类事项已绑定审批流，须凭原审批实例批准回执执行，不能走直接核准');
- if(p.status!=='pending'){if(p.status!==(approve?'approved':'rejected'))conflict('事项已处理，不能用重试改成相反结论');return{proposal:p,replayed:true};}if(same(p.created_by,userId))throw bizErr('E_LEAVE_SELF_APPROVE','生命周期事项须另一有权人员复核');text(reason,'复核意见',4);
+ if(p.status!=='pending'){if(p.status!==(approve?'approved':'rejected'))conflict('事项已处理，不能用重试改成相反结论');return{proposal:p,replayed:true};}if(await sameHuman(t,p.created_by,userId)||await humanIsPerson(t,userId,a.group_id,a.person_id))throw bizErr('E_LEAVE_SELF_APPROVE','生命周期事项须另一有权人员复核');text(reason,'复核意见',4);
  if(typeof approve!=='boolean')bad('须明确批准或驳回');if(approve&&!same(p.baseline_revision,a.revision))conflict('账户预演基线已改变，须重新预演');
  const proposal=await one(t,'UPDATE ty_leave_lifecycle_proposal SET status=$2,approved_by=$3,execution_actor_id=$3,approved_at=clock_timestamp()WHERE id=$1 RETURNING *',[id,approve?'approved':'rejected',userId]);
  let result={};if(approve)result=await applyApprovedProposal(t,a,proposal,userId);
@@ -146,7 +147,7 @@ export async function executeApprovedProposal(t,{userId,id,approvalReceiptId}){
  if(!(await one(t,"SELECT to_regclass('public.ty_workflow_instance')IS NOT NULL ok"))?.ok)throw bizErr('E_LEAVE_USE_APPROVAL','尚未安装统一审批平台，不能伪造审批回执');
  const workflow=await import('./platform-workflow.mjs');
  const receipt=await workflow.verifyApprovalReceipt(t,{userId,instanceId:approvalReceiptId,subjectType:'leave_lifecycle_proposal',subjectId:String(id),sourceHash:p.payload_hash});
- if(!same(receipt.original_requester_id,p.created_by)||same(receipt.approved_by,p.created_by)||!same(receipt.execution_actor_id,userId))conflict('原申请人、真实批准人或实际执行者与冻结审批回执不一致');
+ if(!same(receipt.original_requester_id,p.created_by)||await sameHuman(t,receipt.approved_by,p.created_by)||await humanIsPerson(t,receipt.approved_by,a.group_id,a.person_id)||!same(receipt.execution_actor_id,userId))conflict('原申请人、真实批准人或实际执行者与冻结审批回执不一致');
  if(p.status==='approved'){if(!same(p.workflow_instance_id,receipt.instance_id))conflict('事项已由另一回执生效');return{proposal:p,replayed:true,bank_instruction_created:false};}
  if(p.status!=='pending')conflict('事项已取消或拒绝，旧批准回执不能复活');if(!same(p.baseline_revision,a.revision))conflict('审批后业务基线已改变，须重演重审，不能改用旧回执');
  const proposal=await one(t,"UPDATE ty_leave_lifecycle_proposal SET status='approved',approved_by=$2,execution_actor_id=$3,workflow_instance_id=$4,approved_at=clock_timestamp()WHERE id=$1 RETURNING *",[id,receipt.approved_by,userId,receipt.instance_id]);
@@ -158,11 +159,11 @@ export async function rejectWorkflowProposal(t,{userId,id,instanceId}){
  const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1 FOR UPDATE',[instanceId]);if(!inst)bad('审批实例不存在');
  const platform=await import('./platform-core.mjs');await platform.requireAccess(t,userId,'workflow_self','approve',{group_id:inst.group_id,company_id:inst.company_id,person_id:inst.person_id});
  const task=await one(t,"SELECT 1 ok FROM ty_workflow_task WHERE instance_id=$1 AND approver_id=$2 AND status='rejected'",[instanceId,userId]);
- if(inst.status!=='rejected'||!same(inst.last_approver_id,userId)||!task||same(inst.applicant_id,userId))deny();
+ if(inst.status!=='rejected'||!same(inst.last_approver_id,userId)||!task||await sameHuman(t,inst.applicant_id,userId))deny();
  const first=await one(t,'SELECT p.*,r.group_id FROM ty_leave_lifecycle_proposal p JOIN ty_leave_account a ON a.id=p.account_id JOIN ty_leave_relationship r ON r.id=a.relationship_id WHERE p.id=$1',[id]);
  const blocked=async()=>{await t.query("UPDATE ty_workflow_instance SET business_state='blocked' WHERE id=$1",[instanceId]);await emit(t,{group_id:inst.group_id},`lifecycle-reject:${instanceId}:blocked`,'leave.lifecycle.rejection_needs_review',{proposal_id:id,workflow_instance_id:instanceId,domain_applied:false},userId);return{blocked:true,domain_applied:false};};
  if(!first||inst.subject_type!=='leave_lifecycle_proposal'||!same(inst.subject_id,id)||inst.source_hash!==first.payload_hash||!same(inst.applicant_id,first.created_by)||!same(inst.group_id,first.group_id))return blocked();
- let a;try{a=await assertProposalApprovalAccess(t,{userId,id});}catch(e){if(String(e.message).startsWith('E_TY_FORBIDDEN:'))return blocked();throw e;}
+ let a;try{a=await assertProposalApprovalAccess(t,{userId,id});if(await humanIsPerson(t,userId,a.group_id,a.person_id))deny();}catch(e){if(String(e.message).startsWith('E_TY_FORBIDDEN:'))return blocked();throw e;}
  const p=await one(t,'SELECT * FROM ty_leave_lifecycle_proposal WHERE id=$1 FOR UPDATE',[id]);if(p.status==='rejected'&&same(p.workflow_instance_id,instanceId))return{replayed:true,domain_applied:true};if(p.status!=='pending')return blocked();
  await t.query('SAVEPOINT leave_lifecycle_reject');
  try{if(p.kind==='annual_cash')await releaseCash(t,a,p);const proposal=await one(t,"UPDATE ty_leave_lifecycle_proposal SET status='rejected',approved_by=$2,execution_actor_id=$2,workflow_instance_id=$3,approved_at=clock_timestamp()WHERE id=$1 RETURNING *",[id,userId,instanceId]);await t.query("UPDATE ty_workflow_instance SET business_state='applied' WHERE id=$1",[instanceId]);await t.query('RELEASE SAVEPOINT leave_lifecycle_reject');await emit(t,a,`lifecycle-reject:${instanceId}:applied`,'leave.lifecycle.rejected',{proposal_id:id,workflow_instance_id:instanceId,original_requester_id:p.created_by,approved_by:userId,execution_actor_id:userId},userId);return{proposal,domain_applied:true,cash_released:p.kind==='annual_cash',bank_instruction_created:false};}
@@ -330,7 +331,7 @@ export async function submitOccurrence(t,{userId,id}){
  const sequence=Number(o.request_sequence)+1;
  const submitted=await core.submitRequest(t,{userId,self:a.self,input:{account_id:a.id,scheme_id:auth.scheme_id,employment_id:auth.employment_id,recurring_occurrence_id:o.id,request_key:`occurrence:${o.root_key}:n${sequence}`,starts_at:new Date(o.starts_at).toISOString(),ends_at:new Date(o.ends_at).toISOString(),evidence_ref:`approved-recurring-authorization:${auth.id}`}});
  const originalApproval=await one(t,"SELECT * FROM ty_leave_lifecycle_proposal WHERE id=$1 AND status='approved'",[auth.proposal_id]);
- const inherit=s.rules.recurring?.per_occurrence_approval!==true&&!same(originalApproval.approved_by,userId);
+ const inherit=s.rules.recurring?.per_occurrence_approval!==true&&!await sameHuman(t,originalApproval.approved_by,userId)&&!await humanIsPerson(t,originalApproval.approved_by,a.group_id,a.person_id);
  await t.query('INSERT INTO ty_leave_recurring_request_link(request_id,occurrence_id,authorization_id,sequence,approval_mode,inherited_approved_by,original_requester_id,execution_actor_id)VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[submitted.request.id,id,auth.id,sequence,inherit?'inherited_authorization':'requires_review',inherit?originalApproval.approved_by:null,originalApproval.created_by,userId]);
  let request=submitted.request;if(inherit){await t.query("UPDATE ty_leave_allocation SET state='allocated' WHERE request_id=$1 AND state='held'",[request.id]);request=await one(t,"UPDATE ty_leave_request SET status='approved',approved_by=$2 WHERE id=$1 RETURNING *",[request.id,originalApproval.approved_by]);await emit(t,a,`recurring:${id}:authorization:${auth.id}:n${sequence}`,'leave.recurring.approval_inherited',{request_id:request.id,authorization_id:auth.id,approval_proposal_id:originalApproval.id,original_approved_by:originalApproval.approved_by,execution_actor_id:userId,actual_taken_created:false},userId);}
  const occurrence=await one(t,"UPDATE ty_leave_recurring_occurrence SET status='requested',request_id=$2,request_sequence=$3 WHERE id=$1 RETURNING *",[id,request.id,sequence]);return{occurrence,request,approval_mode:inherit?'inherited_authorization':'requires_review',actual_taken_created:false};

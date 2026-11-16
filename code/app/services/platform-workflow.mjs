@@ -1,3 +1,4 @@
+import{sameHuman,humanIsPerson}from'./human-identity.mjs';
 import{q,one,same,bad,deny,conflict,missing,id,text,obj,revision,groupFor,rowScope,requireAccess,authorization,command,audit,emit,hash,currentOperator,visibleOperators}from'./platform-core.mjs';
 import{validateGraph,validateSchema,validateValues,nextNode,projectValues}from'../platform-model.mjs';
 
@@ -22,7 +23,7 @@ async function resolveApprovers(t,instance,node){
  for(let actor of initial){if(!candidates.has(String(actor)))continue;
   const delegation=await one(t,"SELECT * FROM ty_workflow_delegate WHERE group_id=$1 AND from_account_id=$2 AND status='active' AND valid_from<=now()AND now()<valid_to ORDER BY valid_from DESC LIMIT 1",[instance.group_id,actor]);
   if(delegation&&candidates.has(String(delegation.to_account_id)))actor=Number(delegation.to_account_id);
-  if(same(actor,instance.applicant_id))continue;
+  if(await sameHuman(t,actor,instance.applicant_id)||await humanIsPerson(t,actor,instance.group_id,instance.person_id))continue;
   if(!(await authorization(t,{userId:actor,resource:'workflow_self',action:'approve',groupId:instance.group_id,companyId:instance.company_id})).allowed)continue;
   if(instance.subject_type==='leave_request'&&!(await authorization(t,{userId:actor,resource:'advanced_leave_approve',action:'approve',groupId:instance.group_id,companyId:instance.company_id,personId:instance.person_id})).allowed)continue;
   if(instance.subject_type==='leave_lifecycle_proposal'){try{await(await import('./leave-lifecycle.mjs')).assertProposalApprovalAccess(t,{userId:actor,id:instance.subject_id});}catch(e){if(String(e.message).startsWith('E_TY_FORBIDDEN:'))continue;throw e;}}
@@ -69,7 +70,7 @@ export async function saveDefinition(t,{userId,input,operationId,kind}){
 export async function publishDefinition(t,{userId,input,operationId,kind}){
  const d=await definition(t,kind,input.id);await scope(t,userId,d.group_id,d.company_id,'publish');
  return command(t,{userId,groupId:d.group_id,operation:`${kind}.publish`,operationId,input,execute:async()=>{
-  const old=await one(t,`SELECT * FROM ${TABLES[kind]} WHERE id=$1 FOR UPDATE`,[d.id]);revision(old,input.expected_revision);if(old.status!=='draft')conflict('只有草稿可以发布');if(same(old.created_by,userId))deny('设计者和发布复核人须为不同操作人员');
+  const old=await one(t,`SELECT * FROM ${TABLES[kind]} WHERE id=$1 FOR UPDATE`,[d.id]);revision(old,input.expected_revision);if(old.status!=='draft')conflict('只有草稿可以发布');if(await sameHuman(t,old.created_by,userId))deny('设计者和发布复核人须为不同操作人员');
   const result=kind==='workflow'?validateGraph(old.graph):validateSchema(old.schema);if(!result.valid)bad(result.issues.join('；'));
   if(kind==='form'){const w=await definition(t,'workflow',old.workflow_id);if(w.status!=='published'||w.business_type!==old.business_type)bad('表单须绑定同一业务类型的确切已发布审批流');}
   const row=await one(t,`UPDATE ${TABLES[kind]} SET status='published',published_by=$2,published_at=now(),revision=revision+1 WHERE id=$1 RETURNING *`,[old.id,userId]);
@@ -93,7 +94,7 @@ export async function approvalRequirement(t,{userId,subjectType,groupId,companyI
 export async function verifyApprovalReceipt(t,{userId,instanceId,subjectType,subjectId,sourceHash}){
  const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1',[id(instanceId)]);if(!inst)missing();
  await scope(t,userId,inst.group_id,inst.company_id,'execute');
- if(inst.status!=='approved'||!inst.last_approver_id||same(inst.last_approver_id,inst.applicant_id))deny('审批尚未完成有效的非本人复核');
+ if(inst.status!=='approved'||!inst.last_approver_id||await sameHuman(t,inst.last_approver_id,inst.applicant_id)||await humanIsPerson(t,inst.last_approver_id,inst.group_id,inst.person_id))deny('审批尚未完成有效的非本人复核');
  if(inst.subject_type!==subjectType||!same(inst.subject_id,subjectId)||inst.source_hash!==sourceHash)conflict('审批凭证与当前业务来源不一致');
  if(!['pending','applied'].includes(inst.business_state))conflict('业务执行已阻断，请核查来源');
  return{instance_id:inst.id,approved_by:inst.last_approver_id,original_requester_id:inst.applicant_id,execution_actor_id:userId,source_hash:inst.source_hash};
@@ -139,7 +140,7 @@ export async function projectInstance(t,userId,instanceId){
  out.logs=(await q(t,'SELECT l.id,l.node_id,l.action,l.created_at,l.metadata,a.display_name actor_name FROM ty_workflow_log l JOIN sys_account a ON a.id=l.actor_id WHERE l.instance_id=$1 ORDER BY l.id',[inst.id])).map(l=>({id:l.id,node_id:l.node_id,node_label:inst.graph_snapshot.nodes.find(n=>n.id===l.node_id)?.label||l.node_id,action:l.action,label:labels[l.action]||'处理记录',created_at:l.created_at,actor_name:l.actor_name,...(reasonAllowed&&l.metadata?.reason?{reason:l.metadata.reason}:{})}));
  delete out.form_values;delete out.graph_snapshot;delete out.schema;return out;
 }
-async function taskFor(t,userId,key){const task=await one(t,'SELECT * FROM ty_workflow_task WHERE id=$1',[id(key)]);if(!task)missing();const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1 FOR UPDATE',[task.instance_id]);if(!same(task.approver_id,userId))deny('该任务未分配给当前人员');await requireAccess(t,userId,'workflow_self','approve',inst);if(same(inst.applicant_id,userId))deny('申请人不能审批本人事项');return{task,inst};}
+async function taskFor(t,userId,key){const task=await one(t,'SELECT * FROM ty_workflow_task WHERE id=$1',[id(key)]);if(!task)missing();const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1 FOR UPDATE',[task.instance_id]);if(!same(task.approver_id,userId))deny('该任务未分配给当前人员');await requireAccess(t,userId,'workflow_self','approve',inst);if(await sameHuman(t,inst.applicant_id,userId)||await humanIsPerson(t,userId,inst.group_id,inst.person_id))deny('申请人不能审批本人事项');return{task,inst};}
 export async function decideInstance(t,{userId,input,operationId}){
  const{task,inst}=await taskFor(t,userId,input.task_id);
  return command(t,{userId,groupId:inst.group_id,operation:'instance.decide',operationId,input,project:projectReceipt(t,userId),execute:async()=>{
@@ -159,14 +160,14 @@ export async function decideInstance(t,{userId,input,operationId}){
 export async function transferTask(t,{userId,input,operationId}){
  const{task,inst}=await taskFor(t,userId,input.task_id);
  return command(t,{userId,groupId:inst.group_id,operation:'instance.transfer',operationId,input,project:projectReceipt(t,userId),execute:async()=>{
-  revision(task,input.expected_revision);if(task.status!=='pending'||inst.status!=='running')conflict('任务已变化');const target=id(input.to_account_id);if(same(target,userId)||same(target,inst.applicant_id))bad('不能转交给本人或申请人');const eligible=await resolveApprovers(t,inst,{approver_ids:[target]});if(!eligible.includes(target))deny('接收人不具备当前公司审批权限');const reason=text(input.reason,'转交原因',4);
+  revision(task,input.expected_revision);if(task.status!=='pending'||inst.status!=='running')conflict('任务已变化');const target=id(input.to_account_id);if(await sameHuman(t,target,userId)||await sameHuman(t,target,inst.applicant_id))bad('不能转交给本人或申请人');const eligible=await resolveApprovers(t,inst,{approver_ids:[target]});if(!eligible.includes(target))deny('接收人不具备当前公司审批权限');const reason=text(input.reason,'转交原因',4);
   await t.query("UPDATE ty_workflow_task SET status='transferred',reason=$2,acted_at=now(),revision=revision+1 WHERE id=$1",[task.id,reason]);const prior=await one(t,'SELECT * FROM ty_workflow_task WHERE instance_id=$1 AND node_id=$2 AND approver_id=$3',[inst.id,task.node_id,target]);if(prior)conflict('目标人员已参与该节点，请刷新任务');await t.query('INSERT INTO ty_workflow_task(instance_id,node_id,approver_id,mode)VALUES($1,$2,$3,$4)',[inst.id,task.node_id,target,task.mode]);await t.query('UPDATE ty_workflow_instance SET revision=revision+1 WHERE id=$1',[inst.id]);await log(t,inst,userId,'task.transferred',task.node_id,{to_account_id:target,reason});return{instance:await projectInstance(t,userId,inst.id)};
  }});
 }
 export async function delegateTasks(t,{userId,input,operationId}){
  const g=await groupFor(t,userId,input.group_id),operator=await currentOperator(t,userId);await requireAccess(t,userId,'workflow_self','approve',{group_id:g.id,company_id:operator.company_id});
  return command(t,{userId,groupId:g.id,operation:'instance.delegate',operationId,input,execute:async()=>{
-  const target=id(input.to_account_id),from=new Date(input.valid_from),to=new Date(input.valid_to);if(same(target,userId)||!Number.isFinite(+from)||!Number.isFinite(+to)||to<=from||+to-+from>90*86400000)bad('代理人员及不超过90天的明确有效期必填');const options=await optionsFor(t,userId,g.id,operator.company_id);if(!options.some(r=>same(r.id,target)))deny('代理人员不在可选范围');const reason=text(input.reason,'委托原因',4);if(await one(t,"SELECT 1 FROM ty_workflow_delegate WHERE group_id=$1 AND from_account_id=$2 AND status='active' AND tstzrange(valid_from,valid_to,'[)')&&tstzrange($3,$4,'[)')",[g.id,userId,from,to]))conflict('已有重叠有效代理');const d=await one(t,'INSERT INTO ty_workflow_delegate(group_id,from_account_id,to_account_id,valid_from,valid_to,reason)VALUES($1,$2,$3,$4,$5,$6)RETURNING *',[g.id,userId,target,from,to,reason]);await audit(t,userId,g.id,'instance.delegate','delegate',d.id,{to_account_id:target,valid_from:from,valid_to:to});return{delegation:d};
+  const target=id(input.to_account_id),from=new Date(input.valid_from),to=new Date(input.valid_to);if(await sameHuman(t,target,userId)||!Number.isFinite(+from)||!Number.isFinite(+to)||to<=from||+to-+from>90*86400000)bad('代理人员及不超过90天的明确有效期必填');const options=await optionsFor(t,userId,g.id,operator.company_id);if(!options.some(r=>same(r.id,target)))deny('代理人员不在可选范围');const reason=text(input.reason,'委托原因',4);if(await one(t,"SELECT 1 FROM ty_workflow_delegate WHERE group_id=$1 AND from_account_id=$2 AND status='active' AND tstzrange(valid_from,valid_to,'[)')&&tstzrange($3,$4,'[)')",[g.id,userId,from,to]))conflict('已有重叠有效代理');const d=await one(t,'INSERT INTO ty_workflow_delegate(group_id,from_account_id,to_account_id,valid_from,valid_to,reason)VALUES($1,$2,$3,$4,$5,$6)RETURNING *',[g.id,userId,target,from,to,reason]);await audit(t,userId,g.id,'instance.delegate','delegate',d.id,{to_account_id:target,valid_from:from,valid_to:to});return{delegation:d};
  }});
 }
 export async function executeInstance(t,{userId,input,operationId}){
@@ -180,7 +181,7 @@ export async function executeInstance(t,{userId,input,operationId}){
  }});
 }
 export async function cancelInstance(t,{userId,input,operationId}){
- const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1',[id(input.instance_id)]);if(!inst)missing();if(!same(inst.applicant_id,userId))deny('只能撤回本人提交的申请');await requireAccess(t,userId,'workflow_self','cancel',inst);
+ const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1',[id(input.instance_id)]);if(!inst)missing();if(!await sameHuman(t,inst.applicant_id,userId))deny('只能撤回本人提交的申请');await requireAccess(t,userId,'workflow_self','cancel',inst);
  return command(t,{userId,groupId:inst.group_id,operation:'instance.cancel',operationId,input,project:projectReceipt(t,userId),execute:async()=>{
   const current=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1 FOR UPDATE',[inst.id]);revision(current,input.expected_revision);if(!['running','blocked'].includes(current.status))conflict('只能撤回在办或阻断申请，已完成事项请走业务更正');const reason=text(input.reason,'撤回原因',4);
   if(current.subject_type==='leave_request'){

@@ -57,5 +57,16 @@ try{
  const beforeOldForm=Number((await one('SELECT count(*) n FROM ty_leave_request')).n);
  await assert.rejects(()=>submit('27'));count++;
  check('superseded published form cannot bypass current binding or leak held supply',Number((await one('SELECT count(*) n FROM ty_leave_request')).n)===beforeOldForm);
+ await db.exec(`INSERT INTO sys_account(id,login,display_name)OVERRIDING SYSTEM VALUE VALUES(9504,'leave_subject_hr_alias','实际请假人的HR账号');
+ INSERT INTO sys_user_role(user_id,role_id,data_scope_id,effective_from,grant_kind,grant_reason)VALUES(9504,10,9500,'2000-01-01','ROLE','fictional beneficiary alias');
+ INSERT INTO ty_test_account_profile(account_id,group_id,profile_code,seed_version)VALUES(9504,9500,'group_hr_director','fixture');
+ INSERT INTO ty_operator_binding(account_id,group_id,company_id,person_id,profile_code,created_by)VALUES(9504,9500,9500,9500,'group_hr_director',9501);
+ INSERT INTO ty_access_grant(account_id,group_id,can_read,can_write,valid_from)VALUES(9504,9500,true,true,'2000-01-01');`);
+ const proxyGraph={nodes:[{id:'s',type:'start',next:'a'},{id:'a',type:'approval',mode:'any',approver_ids:[9504],next:'e'},{id:'e',type:'end'}]};
+ const pw=(await run(flow.saveDefinition,{kind:'workflow',input:{group_id:9500,code:'proxy_leave',name:'虚构代理提交核准',business_type:'leave_request',graph:proxyGraph}})).workflow;await run(flow.publishDefinition,{kind:'workflow',input:{id:pw.id,expected_revision:1}},9501);
+ const pf=(await run(flow.saveDefinition,{kind:'form',input:{group_id:9500,code:'proxy_leave_form',name:'虚构代理请假单',business_type:'leave_request',schema,workflow_id:pw.id}})).form;await run(flow.publishDefinition,{kind:'form',input:{id:pf.id,expected_revision:1}},9501);
+ const proxy=(await run(flow.submitInstance,{input:{form_id:pf.id,company_id:9500,title:'虚构另一HR代提本人事项',values:makeValues('28')}},9500)).instance;
+ check('beneficiary HR account cannot approve leave submitted by a different HR',proxy.status==='blocked'&&!await one('SELECT 1 FROM ty_workflow_task WHERE instance_id=$1 AND approver_id=9504',[proxy.id]));
+ await run(flow.cancelInstance,{input:{instance_id:proxy.id,expected_revision:proxy.revision,reason:'虚构测试代理撤回'}},9500);
  console.log(`Native leave + designed workflow ${count}/${count} passed`);
 }finally{await db.close();}

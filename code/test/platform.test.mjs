@@ -21,16 +21,17 @@ try{
  const row=async(s,a=[])=>(await db.query(s,a)).rows[0];
  const run=async(fn,input={},userId=9100,extra={})=>{await db.exec('BEGIN');try{const r=await fn(db,{userId,input,operationId:`PLATFORM-${++key}`, ...extra});await db.exec('COMMIT');return r;}catch(e){await db.exec('ROLLBACK');throw e;}};
  const reject=async(label,fn)=>{await assert.rejects(fn);checks++;console.log('PASS '+label);};
- await db.exec(`INSERT INTO sys_account(id,login,display_name)OVERRIDING SYSTEM VALUE VALUES(9100,'flow_designer','设计虚构员'),(9101,'flow_publisher','复核虚构员'),(9102,'flow_approver','审批虚构员'),(9103,'flow_other','另一虚构员'),(9104,'flow_staff','申请虚构员'),(9105,'flow_config','配置虚构员');
+ await db.exec(`INSERT INTO sys_account(id,login,display_name)OVERRIDING SYSTEM VALUE VALUES(9100,'flow_designer','设计虚构员'),(9101,'flow_publisher','复核虚构员'),(9102,'flow_approver','审批虚构员'),(9103,'flow_other','另一虚构员'),(9104,'flow_staff','申请虚构员'),(9105,'flow_config','配置虚构员'),(9106,'flow_same_person_hr','同一人另一HR账号');
  INSERT INTO sys_data_scope(id,name,combinator)VALUES(9100,'平台隔离测试','intersection');
- INSERT INTO sys_user_role(user_id,role_id,data_scope_id,effective_from,grant_kind,grant_reason)SELECT id,10,9100,'2026-01-01','ROLE','synthetic isolated fixture'FROM sys_account WHERE id BETWEEN 9100 AND 9105;
+ INSERT INTO sys_user_role(user_id,role_id,data_scope_id,effective_from,grant_kind,grant_reason)SELECT id,10,9100,'2026-01-01','ROLE','synthetic isolated fixture'FROM sys_account WHERE id BETWEEN 9100 AND 9106;
  INSERT INTO ty_group(id,code,name)VALUES(9100,'PLATFORM-TEST','平台虚构集团'),(9101,'PLATFORM-OTHER','隔离虚构集团');
  INSERT INTO ty_ledger(id,group_id,code,name,scope_mode)VALUES(9100,9100,'TEST','虚构帐','group');
  INSERT INTO ty_company(id,group_id,ledger_id,code,name)VALUES(9100,9100,9100,'A','虚构甲店'),(9101,9100,9100,'B','虚构乙店');
  INSERT INTO ty_person(id,group_id,person_number,full_name)VALUES(9100,9100,'P-TEST','申请虚构员');
  INSERT INTO ty_employment(group_id,person_id,company_id,legal_subject_name,hire_date)VALUES(9100,9100,9100,'虚构主体','2026-01-01');
- INSERT INTO ty_test_account_profile(account_id,group_id,person_id,company_id,profile_code,seed_version)VALUES(9100,9100,null,null,'group_hr_director','platform-test'),(9101,9100,null,null,'group_hr_director','platform-test'),(9102,9100,null,null,'group_hr_director','platform-test'),(9103,9100,null,null,'group_hr_director','platform-test'),(9104,9100,9100,9100,'store_staff','platform-test'),(9105,9100,null,null,'config_admin','platform-test');
- INSERT INTO ty_access_grant(account_id,group_id,company_id,can_read,can_write,valid_from)SELECT id,9100,CASE WHEN id=9104 THEN 9100 END,true,true,'2026-01-01'FROM sys_account WHERE id BETWEEN 9100 AND 9105;`);
+ INSERT INTO ty_test_account_profile(account_id,group_id,person_id,company_id,profile_code,seed_version)VALUES(9100,9100,null,null,'group_hr_director','platform-test'),(9101,9100,null,null,'group_hr_director','platform-test'),(9102,9100,null,null,'group_hr_director','platform-test'),(9103,9100,null,null,'group_hr_director','platform-test'),(9104,9100,9100,9100,'store_staff','platform-test'),(9105,9100,null,null,'config_admin','platform-test'),(9106,9100,null,null,'group_hr_director','platform-test');
+ INSERT INTO ty_operator_binding(account_id,group_id,person_id,company_id,profile_code,created_by)VALUES(9100,9100,9100,9100,'group_hr_director',9101),(9106,9100,9100,9100,'group_hr_director',9101);
+ INSERT INTO ty_access_grant(account_id,group_id,company_id,can_read,can_write,valid_from)SELECT id,9100,CASE WHEN id=9104 THEN 9100 END,true,true,'2026-01-01'FROM sys_account WHERE id BETWEEN 9100 AND 9106;`);
  const graph={nodes:[{id:'s',type:'start',next:'a'},{id:'a',type:'approval',approver_ids:[9102,9103],mode:'all',next:'e'},{id:'e',type:'end'}]};
  check('invalid null graph/schema return validation issues',!model.validateGraph({nodes:[null,null,null]}).valid&&!model.validateSchema({fields:[null]}).valid);
  check('valid graph accepted',model.validateGraph(graph).valid);
@@ -39,6 +40,7 @@ try{
  await reject('missing conditional field does not default-skip',async()=>model.conditionMatches({field:'cost',op:'gt',value:'1'},{}));
  const w=(await run(workflow.saveDefinition,{group_id:9100,code:'flow',name:'虚构流程',business_type:'general',graph},9100,{kind:'workflow'})).workflow;
  await reject('designer cannot publish own workflow',()=>run(workflow.publishDefinition,{id:w.id,expected_revision:w.revision},9100,{kind:'workflow'}));
+ await reject('same employee different HR login cannot publish own workflow',()=>run(workflow.publishDefinition,{id:w.id,expected_revision:w.revision},9106,{kind:'workflow'}));
  const published=(await run(workflow.publishDefinition,{id:w.id,expected_revision:w.revision},9101,{kind:'workflow'})).workflow;check('different reviewer publishes exact version',published.status==='published'&&Number(published.version)===1);
  await reject('published graph immutable at database',()=>db.query("UPDATE ty_workflow_definition SET graph='{}' WHERE id=$1",[w.id]));
  const schema={fields:[{key:'purpose',label:'领用用途',type:'text',required:true},{key:'cost',label:'金额',type:'money',required:true,sensitivity:'restricted'}]};
@@ -88,6 +90,11 @@ try{
  await db.query("INSERT INTO ty_auth_managed(account_id,group_id,resource)VALUES(9104,9100,'workflow_self')");
  await db.query("INSERT INTO ty_auth_grant(group_id,subject_type,account_id,resource,actions,company_id,fields_allow,reason,created_by)VALUES(9100,'account',9104,'workflow_self',ARRAY['read','submit'],9100,ARRAY['purpose'],'虚构提交回执字段限制',9100)");
  const replayMasked=await run(workflow.submitInstance,input,9104,{operationId:op});check('old command replay reprojects values under current fields',replayMasked.replayed&&replayMasked.instance.values.purpose==='工作用品'&&!('cost'in replayMasked.instance.values));
+ const aliasGraph={nodes:[{id:'s',type:'start',next:'a'},{id:'a',type:'approval',approver_ids:[9106],mode:'any',next:'e'},{id:'e',type:'end'}]};
+ const aw=(await run(workflow.saveDefinition,{group_id:9100,code:'alias_guard',name:'同人账号隔离审核',graph:aliasGraph},9100,{kind:'workflow'})).workflow;await run(workflow.publishDefinition,{id:aw.id,expected_revision:1},9101,{kind:'workflow'});
+ const af=(await run(workflow.saveDefinition,{group_id:9100,code:'alias_form',name:'虚构同人账号表单',schema,workflow_id:aw.id},9100,{kind:'form'})).form;await run(workflow.publishDefinition,{id:af.id,expected_revision:1},9101,{kind:'form'});
+ check('requester HR alias is excluded from actual approval resolution',(await run(workflow.submitInstance,{...input,form_id:af.id},9104)).instance.status==='blocked');
+ await reject('delegation cannot bypass self separation through another login',()=>run(workflow.delegateTasks,{group_id:9100,to_account_id:9106,valid_from:'2026-01-01T00:00:00+08:00',valid_to:'2026-01-02T00:00:00+08:00',reason:'同人账号不得代理审批'},9100));
  console.log(`Platform full base migration +214 workflow: ${checks}/${checks} passed`);
 }finally{await db.close();}
 function sameId(a,b){return String(a)===String(b);}

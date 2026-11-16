@@ -31,7 +31,7 @@ export async function authorization(t,{userId,resource,action='read',groupId,com
  if(p?.profile_code==='config_admin'&&!configResources.has(resource))return{allowed:false,denied_reasons:['配置岗位没有业务数据权限'],field_visibility:{}};
  if(p?.profile_code==='boss'&&!['read','export'].includes(action))return{allowed:false,denied_reasons:['当前岗位为只读'],field_visibility:{}};
  const selfResource=['advanced_leave_self','workflow_self','people_dorm_self','people_cert_self','people_goods_self'].includes(resource);
- const selfBound=selfResource&&p?.person_id&&same(p.group_id,group)&&same(p.person_id,personId);
+ const selfBound=selfResource&&a.selfOnly&&p?.person_id&&same(p.group_id,group)&&same(p.person_id,personId);
  if(!a.group(group)&&!selfBound)return{allowed:false,denied_reasons:['集团范围不符'],field_visibility:{}};
  if(companyId&&!await one(t,'SELECT 1 FROM ty_company WHERE id=$1 AND group_id=$2',[id(companyId),group])||personId&&!await one(t,'SELECT 1 FROM ty_person WHERE id=$1 AND group_id=$2',[id(personId),group])||departmentId&&!await one(t,'SELECT 1 FROM ty_department d JOIN ty_company c ON c.id=d.company_id WHERE d.id=$1 AND c.group_id=$2',[id(departmentId),group]))return{allowed:false,denied_reasons:['目标记录不属于当前集团'],field_visibility:{}};
  const now=at?new Date(at):new Date();if(!Number.isFinite(+now))bad('模拟时点无效');

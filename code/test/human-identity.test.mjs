@@ -1,0 +1,7 @@
+import test from'node:test';import assert from'node:assert/strict';import{PGlite}from'@electric-sql/pglite';import{sameHuman}from'../app/services/human-identity.mjs';
+test('canonical employee identity survives different logins and supersedes old bindings',async()=>{const db=await PGlite.create();try{
+ await db.exec(`CREATE TABLE sys_account(id bigint PRIMARY KEY,person_id bigint);CREATE TABLE ty_test_account_profile(account_id bigint PRIMARY KEY,group_id bigint,person_id bigint);CREATE TABLE ty_operator_binding(account_id bigint PRIMARY KEY,group_id bigint,person_id bigint);
+ INSERT INTO sys_account VALUES(1,10),(2,10),(3,20),(4,null),(5,null),(6,60);INSERT INTO ty_test_account_profile VALUES(1,1,100),(2,1,999),(3,1,200),(6,2,100);INSERT INTO ty_operator_binding VALUES(2,1,100);`);
+ assert.equal(await sameHuman(db,1,2),true);assert.equal(await sameHuman(db,1,3),false);assert.equal(await sameHuman(db,1,6),false);assert.equal(await sameHuman(db,4,5),false);assert.equal(await sameHuman(db,'04',4),true);assert.equal(await sameHuman(db,null,null),false);
+}finally{await db.close();}});
+test('minimal native-domain fixtures still use actual stored legacy employee identity',async()=>{const db=await PGlite.create();try{await db.exec('CREATE TABLE sys_account(id bigint PRIMARY KEY,person_id bigint);INSERT INTO sys_account VALUES(1,10),(2,10),(3,30);');assert.equal(await sameHuman(db,1,2),true);assert.equal(await sameHuman(db,1,3),false);}finally{await db.close();}});

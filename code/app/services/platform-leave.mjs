@@ -1,3 +1,4 @@
+import{sameHuman,humanIsPerson}from'./human-identity.mjs';
 import{one,same,bad,deny,conflict,id,hash,requireAccess}from'./platform-core.mjs';
 import{accountContext,submitRequest}from'./advanced-leave.mjs';
 
@@ -28,7 +29,7 @@ export async function executeApprovedLeave(t,{userId,id:requestId,approvalReceip
  const request=await one(t,'SELECT * FROM ty_leave_request WHERE id=$1 FOR UPDATE',[first.request.id]);
  const source=await leaveRequestSource(t,request.id);
  const{verifyApprovalReceipt}=await import('./platform-workflow.mjs');const receipt=await verifyApprovalReceipt(t,{userId,instanceId:approvalReceiptId,subjectType:'leave_request',subjectId:String(request.id),sourceHash:source.source_hash});
- if(!same(receipt.original_requester_id,request.created_by)||same(receipt.approved_by,request.created_by)||!same(receipt.execution_actor_id,userId))deny('请假审批的申请人、批准人或实际执行人不符');
+ if(!same(receipt.original_requester_id,request.created_by)||await sameHuman(t,receipt.approved_by,request.created_by)||await humanIsPerson(t,receipt.approved_by,source.group_id,source.person_id)||!same(receipt.execution_actor_id,userId))deny('请假审批的申请人、批准人或实际执行人不符');
  if(request.status==='approved'){
   const existing=await one(t,"SELECT 1 FROM ty_workflow_instance WHERE id=$1 AND business_state='applied'",[receipt.instance_id]);if(!existing||!same(request.approved_by,receipt.approved_by))conflict('请假已由其他路径处理');return{request,replayed:true};
  }
@@ -45,7 +46,7 @@ export async function rejectLeaveSubject(t,{userId,instance}){
  await accountContext(t,{userId,accountId:first.request.account_id,resource:'advanced_leave_approve',write:true,action:'approve',fields:['status','approved_by']});
  const current=await one(t,'SELECT * FROM ty_leave_request WHERE id=$1 FOR UPDATE',[first.request.id]);const source=await leaveRequestSource(t,current.id);
  const task=await one(t,"SELECT 1 FROM ty_workflow_task WHERE instance_id=$1 AND approver_id=$2 AND status='rejected'",[instance.id,userId]);
- if(!task||same(userId,current.created_by)||!same(instance.applicant_id,current.created_by))deny('拒绝审批没有有效的真实任务来源');
+ if(!task||await sameHuman(t,userId,current.created_by)||await humanIsPerson(t,userId,source.group_id,source.person_id)||!same(instance.applicant_id,current.created_by))deny('拒绝审批没有有效的真实任务来源');
  const {emit}=await import('./platform-core.mjs');
  if(source.source_hash!==instance.source_hash||current.status!=='pending'){
   await t.query("UPDATE ty_workflow_instance SET business_state='blocked',block_reason='请假来源已变化，拒绝后额度释放待核',revision=revision+1 WHERE id=$1",[instance.id]);
