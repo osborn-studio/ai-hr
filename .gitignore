@@ -49,3 +49,10 @@ workspace-access.json
 
 # Local demonstration login credentials
 test-accounts.json
+
+# Generated frontend and test output
+coverage/
+.vite/
+.cache/
+playwright-report/
+test-results/
