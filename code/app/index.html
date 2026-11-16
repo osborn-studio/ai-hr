@@ -5761,9 +5761,17 @@ async function viewExceptions() {
 // ============================================================================
 const TR_CAT = { safety: '安全', onboarding: '入职', skill: '技能', compliance: '合规' };
 let TR_YEAR = null;
+let TR_ENTITY = null;
 
 async function viewTraining() {
-  const q = TR_YEAR ? `?entity=1&year=${TR_YEAR}` : '?entity=1';
+  const entityResponse = await call('/api/training/entities');
+  if (entityResponse.status !== 200) return fail(entityResponse);
+  const trainingEntities = entityResponse.body.rows || [];
+  if (!trainingEntities.some(e => Number(e.id) === TR_ENTITY)) TR_ENTITY = trainingEntities.length ? Number(trainingEntities[0].id) : null;
+  if (!TR_ENTITY) return fail({status:422,body:{error:'E_ARG_INVALID',message:'请先维护可用的发薪主体，再建立培训场次'}});
+  const trainingQuery = new URLSearchParams({entity:String(TR_ENTITY)});
+  if (TR_YEAR) trainingQuery.set('year',String(TR_YEAR));
+  const q = '?' + trainingQuery.toString();
   const r = await call('/api/training' + q);
   if (r.status !== 200) return fail(r);
   const d = r.body;
@@ -5776,6 +5784,8 @@ async function viewTraining() {
     <h2>培训学习 <span class="sub" style="font-weight:400">${d.year} 年度 ·
       学时是到场记录，不是填报数字</span>
       <span style="flex:1"></span>
+      <label class="sub" style="font-weight:400">培训主体
+        <select id="trEntity" aria-label="培训主体">${trainingEntities.map(e => `<option value="${Number(e.id)}" ${Number(e.id) === TR_ENTITY ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>
       <label class="sub" style="font-weight:400">年度
         <input id="trYear" type="number" value="${d.year}" style="width:80px"></label>
     </h2>
@@ -6119,6 +6129,8 @@ async function viewTraining() {
 
   const yIn = $('#trYear');
   if (yIn) yIn.onchange = (e) => { TR_YEAR = e.target.value; load(); };
+  const entityInput = $('#trEntity');
+  if (entityInput) entityInput.onchange = (e) => { TR_ENTITY = Number(e.target.value); load(); };
 
   const ac = $('#trAddCourse');
   if (ac) ac.onclick = async () => {
@@ -6140,7 +6152,7 @@ async function viewTraining() {
   const as = $('#trAddSess');
   if (as) as.onclick = async () => {
     const qs = new URLSearchParams({
-      course: $('#trSessCourse').value, entity: '1', date: $('#trDate').value,
+      course: $('#trSessCourse').value, entity: String(TR_ENTITY), date: $('#trDate').value,
       from: $('#trFrom').value, to: $('#trTo').value, hours: $('#trSHours').value,
       capacity: $('#trCap').value.trim(), trainer: $('#trTrainer').value.trim(), place: '',
     });

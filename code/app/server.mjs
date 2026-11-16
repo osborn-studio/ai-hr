@@ -4553,6 +4553,10 @@ export async function createApp() {
       // ---- 培训学习（144）----
       // ★ 没有"点通过"这个接口：结业由学时判定（fn_training_attend）。
       //   开一个人工通过的口子，这个字段迟早全是"通过"。
+      if (req.method === 'GET' && url.pathname === '/api/training/entities') {
+        return await runRead(res, tx => training.entities(tx,{userId:uid}));
+      }
+
       if (url.pathname === '/api/training') {
         const entity = Number(url.searchParams.get('entity') || 1);
         const year = Number(url.searchParams.get('year') || 0) || null;
