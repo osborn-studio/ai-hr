@@ -1,3 +1,4 @@
+import {inContext} from './scope-tree.mjs';
 import {businessSettings,exactAmount} from './customer-workbench.mjs';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const list=v=>Array.isArray(v)?v:[];
@@ -9,7 +10,7 @@ let activeToken=null;const saved=new Map();
 export async function renderHKTools({container,bootstrap,context,token,request,toast,isCurrent=()=>true}){
   if(activeToken!==token){saved.clear();activeToken=token;}
   if(!isCurrent())return;
-  const companies=list(bootstrap.companies).filter(c=>(!context.ledger_id||String(c.ledger_id)===String(context.ledger_id))&&(!context.company_id||String(c.id)===String(context.company_id))).filter(c=>{const settings=businessSettings(bootstrap,{company_id:c.id});return settings.region==='HK'&&settings.currency==='HKD';});
+  const companies=list(bootstrap.companies).filter(c=>inContext(bootstrap,c,context)).filter(c=>{const settings=businessSettings(bootstrap,{company_id:c.id});return settings.region==='HK'&&settings.currency==='HKD';});
   if(!companies.length){container.innerHTML='<section class="card"><h2>选择香港业务范围</h2><p>当前授权范围没有已配置为香港地区及港元币种的公司。请在顶部选择香港帐套，或先在品牌、帐套基础中配置地区。</p></section>';return;}
   const key=[context.group_id,context.ledger_id,context.company_id].join(':');if(!saved.has(key))saved.set(key,{tool:'continuous-contract',drafts:{}});const state=saved.get(key);
   const companyOptions=id=>'<option value="">请选择香港公司</option>'+companies.map(c=>`<option value="${c.id}" ${String(c.id)===String(id)?'selected':''}>${esc(c.name)}</option>`).join('');

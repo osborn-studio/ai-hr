@@ -7,7 +7,7 @@ import * as foundation from './foundation.mjs';
 
 export const RESOURCES=['ledger'];
 export const VERSION='TY-ACCOUNTS-v1';
-const summaries={config_admin:'系统参数、组织基础、角色授权与制度；不办理工资或绩效',demo:'全部功能与授权范围',boss:'集团经营、人事与薪酬只读；不能修改业务或授权',hr_manager:'集团人事、招聘、薪酬、绩效和培训；无系统授权配置',recruiter:'招聘需求与招聘流程；人员只读，不算薪',payroll:'工资、薪酬规则和考勤；人员只读，不办理雇佣',trainer:'培训课程、场次及考试；人员只读，不算薪',hr_staff:'基础人事、入离调转；不算薪或修改系统授权',store_manager:'本店人员、考勤排班与请假；只能查看本人薪资',store_staff:'本人资料、请假、考勤与培训；不能看他人工资',station_staff:'本人资料、档口任职、请假、考勤与培训；不能看他人工资'};
+const summaries={group_hr_director:'本集团全部HR、组织编制和跨品牌雇佣历史；不能访问其他集团',company_hr_director:'授权公司及下属门店的HR业务、组织岗位和编制；不读取其他品牌历史',config_admin:'系统参数、组织基础、角色授权与制度；不办理工资或绩效',demo:'全部功能与授权范围',boss:'集团经营、人事与薪酬只读；不能修改业务或授权',hr_manager:'集团人事、招聘、薪酬、绩效和培训；无系统授权配置',recruiter:'招聘需求与招聘流程；人员只读，不算薪',payroll:'工资、薪酬规则和考勤；人员只读，不办理雇佣',trainer:'培训课程、场次及考试；人员只读，不算薪',hr_staff:'基础人事、入离调转；不算薪或修改系统授权',store_manager:'本店人员、考勤排班与请假；只能查看本人薪资',store_staff:'本人资料、请假、考勤与培训；不能看他人工资',station_staff:'本人资料、档口任职、请假、考勤与培训；不能看他人工资'};
 const q=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows;
 const same=(a,b)=>String(a)===String(b);
 const fail=m=>{throw bizErr('E_TY_CONFLICT',m);};
@@ -41,7 +41,7 @@ async function metadata(tx,groupId) {
   WHERE pf.group_id=$1 ORDER BY CASE WHEN pf.person_id IS NULL THEN 0 ELSE 1 END,a.id`,[groupId]);
  for(const r of rows) {
   r.role_name=roleSpecs.find(s=>s.profile_code===r.profile_code)?.role_name ||
-   (r.profile_code==='store_manager'?'店长':r.profile_code==='station_staff'?'档口人员':r.company_name==='天意集团总部'?'总部员工·自助':'店员');
+   (r.profile_code==='group_hr_director'?'集团HR总监':r.profile_code==='company_hr_director'?'公司HR总监':r.profile_code==='store_manager'?'店长':r.profile_code==='station_staff'?'档口人员':r.company_name==='天意集团总部'?'总部员工·自助':'店员');
   r.permission_summary=summaries[r.profile_code]||'';
   if(r.person_id)r.work_areas=(await q(tx,`SELECT DISTINCT w.id,w.name,w.mode FROM ty_position_assignment a JOIN ty_work_area w ON w.id=a.work_area_id
     WHERE a.employment_id IN(SELECT id FROM ty_employment WHERE person_id=$1 AND status='active')
@@ -60,14 +60,14 @@ export async function seed(tx,{userId,input={},passwordFactory=()=>`Ty9!${random
  if(!group||group.code!=='TY-TEST')fail('只允许为完整TY-TEST虚构集团建立演示账号');
  const receipt=(await q(tx,"SELECT after_data FROM ty_audit WHERE entity_kind='test_workspace' AND entity_id=$1 AND action='seed' ORDER BY id DESC LIMIT 1",[group.id]))[0]?.after_data;
  if(!receipt?.complete||!receipt.synthetic)fail('必须先建立完整虚构测试帐套');
- const people=await q(tx,`SELECT p.id,p.person_number,p.full_name,p.legacy_person_id,e.id AS employment_id,e.company_id,e.legacy_employment_id,
+ const people=await q(tx,`SELECT DISTINCT ON(p.id) p.id,p.person_number,p.full_name,p.legacy_person_id,e.id AS employment_id,e.company_id,e.legacy_employment_id,
   c.name AS company_name,c.company_kind,c.ledger_id,a.id AS assignment_id,a.department_id,a.position_id,a.grade_id,a.work_area_id,j.code AS job_code,
   a.valid_from,a.valid_to
   FROM ty_person p JOIN ty_employment e ON e.person_id=p.id AND e.status='active'
   JOIN ty_company c ON c.id=e.company_id JOIN ty_position_assignment a ON a.employment_id=e.id AND a.is_primary
     AND a.status='active' AND a.valid_from<=app_today() AND (a.valid_to IS NULL OR app_today()<a.valid_to)
   JOIN ty_company_position cp ON cp.id=a.position_id JOIN ty_job j ON j.id=cp.job_id
-  WHERE p.group_id=$1 ORDER BY p.id`,[group.id]);
+  WHERE p.group_id=$1 ORDER BY p.id,e.hire_date,e.id`,[group.id]);
  if(people.length!==62||new Set(people.map(p=>String(p.id))).size!==62||people.some(p=>!p.legacy_person_id))fail('当前测试帐套必须有62名已接续的虚构员工及有效主任职');
  const bindings=await q(tx,`SELECT b.*,c.ledger_id FROM ty_legacy_company_binding b JOIN ty_company c ON c.id=b.company_id WHERE c.group_id=$1 ORDER BY c.id`,[group.id]);
  if(bindings.length!==21)fail('请先完成21家测试经营公司的旧业务接续');

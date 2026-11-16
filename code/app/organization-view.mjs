@@ -1,3 +1,4 @@
+import {inContext} from './scope-tree.mjs';
 // Organization is rendered from the new company model, never legacy dept nodes.
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const rows=v=>Array.isArray(v)?v:[];
@@ -18,7 +19,7 @@ export async function renderOrganization({container,bootstrap:data,context,asOf,
   const key=[context.group_id,context.ledger_id,context.company_id].join(':');if(!viewState.has(key))viewState.set(key,{view:'structure',date:asOf,query:'',page:1,open:new Set(),rowPages:{}});const state=viewState.get(key);
   const lookup=(collection,id)=>rows(data[collection]).find(r=>same(r.id,id));
   const name=(collection,id,fallback='—')=>lookup(collection,id)?.name||fallback;
-  const companies=rows(data.companies).filter(c=>(!context.ledger_id||same(c.ledger_id,context.ledger_id))&&(!context.company_id||same(c.id,context.company_id))),departments=rows(data.departments),areas=rows(data.work_areas),positions=rows(data.positions),people=rows(data.people),employments=rows(data.employments),pageSize=8;
+  const companies=rows(data.companies).filter(c=>inContext(data,c,context)),departments=rows(data.departments),areas=rows(data.work_areas),positions=rows(data.positions),people=rows(data.people),employments=rows(data.employments),pageSize=8;
   const typeLabel={store:'门店经营公司',headquarters:'总部经营公司',kitchen:'中央厨房公司'};
   const brandName=c=>c.brand_id?name('brands',c.brand_id,'品牌资料未提供'):lookup('ledgers',c.ledger_id)?.scope_mode==='group'?'集团直属':'未设品牌';
   const group=lookup('groups',context.group_id),groupName=group?.name||'当前授权范围',synthetic=group?.code==='TY-TEST'||group?.code==='TYDEMO';

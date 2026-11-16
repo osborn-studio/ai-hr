@@ -2,7 +2,7 @@ import {
   createHash
 } from 'node:crypto';
 import {
-  accessFor
+  accessFor, ledgerDescendants, companyDescendants
 } from './foundation.mjs';
 import {
   bizErr
@@ -104,7 +104,8 @@ async function load(tx, userId, batchId, {
   const all = (await tx.query(
     `SELECT r.*,c.name company_name,c.code company_code,c.ledger_id,p.person_number,p.full_name,e.hire_date,e.leave_date,e.status employment_status FROM ty_payroll_row r LEFT JOIN ty_company c ON c.id=r.company_id LEFT JOIN ty_person p ON p.id=r.person_id LEFT JOIN ty_employment e ON e.id=r.employment_id WHERE r.batch_id=$1 ORDER BY r.id`,
     [b.id])).rows;
-  const visible = all.filter(r => (!ledgerId||same(r.ledger_id,ledgerId))&&(!companyId || same(r.company_id, companyId)) && (r.company_id ? a.row({
+  const lids=await ledgerDescendants(tx,ledgerId),cids=await companyDescendants(tx,companyId);
+  const visible = all.filter(r => (!ledgerId||lids.includes(String(r.ledger_id)))&&(!companyId || cids.includes(String(r.company_id))) && (r.company_id ? a.row({
     ...r,
     company_id: r.company_id
   }, write) : a.shared(b.group_id, write)));
@@ -574,13 +575,13 @@ export async function listBatches(tx, {
   if (groupId) groupCheck(a, id(groupId));
   const batches = (await tx.query('SELECT * FROM ty_payroll_batch ORDER BY id DESC')).rows;
   const out = [];
+  const lids=await ledgerDescendants(tx,ledgerId),cids=await companyDescendants(tx,companyId);
   for (const b of batches) {
     if (groupId && !same(b.group_id, groupId) || !a.group(b.group_id)) continue;
     const rs = (await tx.query(
       'SELECT r.company_id,c.ledger_id FROM ty_payroll_row r LEFT JOIN ty_company c ON c.id=r.company_id WHERE r.batch_id=$1',
       [b.id])).rows;
-    const shown = rs.filter(r => (!ledgerId || same(r.ledger_id, ledgerId)) && (!companyId || same(r
-      .company_id, companyId)) && (r.company_id ? a.row({
+    const shown = rs.filter(r => (!ledgerId || lids.includes(String(r.ledger_id))) && (!companyId || cids.includes(String(r.company_id))) && (r.company_id ? a.row({
       ...r,
       group_id: b.group_id
     }) : a.shared(b.group_id)));

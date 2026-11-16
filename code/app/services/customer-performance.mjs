@@ -1,7 +1,7 @@
 // The workbook supplies evidence; only explicitly verified rules and identities
 // participate in calculation. Transaction ownership remains with runRead/runWrite.
 import { bizErr } from '../errors.mjs';
-import { accessFor } from './foundation.mjs';
+import { accessFor,ledgerDescendants,companyDescendants } from './foundation.mjs';
 import { csv } from '../csv.mjs';
 import { readXlsx } from '../xlsx.mjs';
 import { companyLocale,regionCode } from './payroll-jurisdiction.mjs';
@@ -39,8 +39,9 @@ async function context(tx,{userId,cycleId,groupId,ledgerId,companyId},action='re
   const cycle=(await q(tx,`SELECT * FROM ty_perf_cycle WHERE id=$1${lock?' FOR UPDATE':''}`,[id(cycleId,'周期编号')]))[0];
   if(!cycle||(gid&&!eq(gid,cycle.group_id))) missing();
   const companies=await q(tx,`SELECT c.* FROM ty_perf_cycle_company pc JOIN ty_company c ON c.id=pc.company_id WHERE pc.cycle_id=$1 ORDER BY c.id`,[cycle.id]);
+  const lids=await ledgerDescendants(tx,lid),cids=await companyDescendants(tx,cid);
   const visible=companies.filter(c=>a.row({...c,company_id:c.id},action==='write')
-    &&(!lid||eq(lid,c.ledger_id))&&(!cid||eq(cid,c.id)));
+    &&(!lid||lids.includes(String(c.ledger_id)))&&(!cid||cids.includes(String(c.id))));
   if(!visible.length) missing();
   if(whole&&visible.length!==companies.length) deny('此操作需要整个考核周期所有公司的写权限和完整公司上下文；不能用局部帐套或公司范围修改全体结果');
   return {a,cycle,companies,visible,full:visible.length===companies.length};
@@ -91,11 +92,11 @@ export async function listCycles(tx,{userId,groupId,ledgerId,companyId}={}) {
   const a=await access(tx,userId,'read');
   const rows=await q(tx,'SELECT * FROM ty_perf_cycle ORDER BY start_date DESC,id DESC');
   const owned=await q(tx,'SELECT pc.cycle_id,c.* FROM ty_perf_cycle_company pc JOIN ty_company c ON c.id=pc.company_id ORDER BY c.id');
-  const cycles=[];
+  const cycles=[];const lids=await ledgerDescendants(tx,ledgerId),cids=await companyDescendants(tx,companyId);
   for(const c of rows) {
     if(groupId&&!eq(groupId,c.group_id))continue;
     const all=owned.filter(v=>eq(v.cycle_id,c.id));
-    const visible=all.filter(v=>a.row({...v,company_id:v.id})&&(!ledgerId||eq(ledgerId,v.ledger_id))&&(!companyId||eq(companyId,v.id)));
+    const visible=all.filter(v=>a.row({...v,company_id:v.id})&&(!ledgerId||lids.includes(String(v.ledger_id)))&&(!companyId||cids.includes(String(v.id))));
     if(!visible.length)continue;
     const full=visible.length===all.length;
     cycles.push({...publicCycle(c,full),company_ids:visible.map(v=>v.id),visible_company_count:visible.length,partial_scope:!full,

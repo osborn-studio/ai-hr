@@ -13,7 +13,7 @@ export async function personaFor(tx,userId) {
 const denied=message=>{throw bizErr('E_RESOURCE_FORBIDDEN',message);};
 const staff=new Set(['store_staff','station_staff']);
 const store=new Set([...staff,'store_manager']);
-const selfPaths=new Set(['/api/customer-payroll/my','/api/training/my','/api/exam/my-board']);
+const selfPaths=new Set(['/api/time/my','/api/customer-payroll/my','/api/training/my','/api/exam/my-board']);
 const selfExam=new Set(['/api/exam/paper','/api/exam/start','/api/exam/submit','/api/exam/result','/api/exam/ledger','/api/exam/tasks','/api/exam/window','/api/exam/review','/api/exam/event']);
 
 export async function authorizePersonaRequest(tx,{userId,pathname,method}) {
@@ -30,7 +30,7 @@ export async function authorizePersonaRequest(tx,{userId,pathname,method}) {
   if(staff.has(p.profile_code)) {
     const basic=pathname==='/api/foundation/bootstrap'||/^\/api\/foundation\/people\/\d+\/timeline$/.test(pathname);
     const selfLeave=new Set(['/api/leave/balance','/api/leave/apply','/api/leave/types']);
-    const allowed=basic||selfExam.has(pathname)||selfLeave.has(pathname)||pathname==='/api/payslip'||pathname.startsWith('/api/approval/my')||pathname.startsWith('/api/approval/mine');
+    const allowed=pathname==='/api/time/export.csv'||basic||selfExam.has(pathname)||selfLeave.has(pathname)||pathname==='/api/payslip'||pathname.startsWith('/api/approval/my')||pathname.startsWith('/api/approval/mine');
     if(!allowed)denied('普通员工账号仅提供本人资料、工资、假期和学习自助功能');
   }
 }

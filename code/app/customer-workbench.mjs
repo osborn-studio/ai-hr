@@ -1,3 +1,4 @@
+import {inContext} from './scope-tree.mjs';
 // Customer business workbenches. All writes remain authenticated server calls.
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=v=>v===null||v===undefined?'—':Number(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -55,7 +56,7 @@ export async function renderCustomer({kind,container,request,bootstrap,context,t
   const ctx=new URLSearchParams(Object.entries(context).filter(([,v])=>v!==''&&v!==null)).toString();
   const groupId=Number(context.group_id||bootstrap.context?.group_id||0);
   const defaults=businessSettings(bootstrap,context),defaultCurrency=defaults.currency||'',defaultRegion=defaults.region||'';
-  const companies=list(bootstrap.companies).filter(c=>(!context.ledger_id||String(c.ledger_id)===String(context.ledger_id))&&(!context.company_id||String(c.id)===String(context.company_id))),companyIds=new Set(companies.map(c=>String(c.id))),employments=list(bootstrap.employments).filter(e=>companyIds.has(String(e.company_id))),personIds=new Set(employments.map(e=>String(e.person_id))),people=list(bootstrap.people).filter(p=>!context.ledger_id&&!context.company_id||personIds.has(String(p.id)));
+  const companies=list(bootstrap.companies).filter(c=>inContext(bootstrap,c,context)),companyIds=new Set(companies.map(c=>String(c.id))),employments=list(bootstrap.employments).filter(e=>companyIds.has(String(e.company_id))),personIds=new Set(employments.map(e=>String(e.person_id))),people=list(bootstrap.people).filter(p=>!context.ledger_id&&!context.company_id||personIds.has(String(p.id)));
   const companyName=id=>companies.find(c=>String(c.id)===String(id))?.name||id||'待匹配';
   const personName=id=>{const p=people.find(p=>String(p.id)===String(id));return p?`${p.full_name} · ${p.person_number}`:id||'待匹配';};
   const download=async(path,filename,open=false)=>{

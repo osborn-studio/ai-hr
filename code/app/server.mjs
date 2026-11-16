@@ -1,3 +1,5 @@
+import * as organizationPlanning from './services/organization.mjs';
+import * as advancedTime from './services/advanced-time.mjs';
 // ============================================================================
 // server.mjs · 最小垂直切片
 // ----------------------------------------------------------------------------
@@ -819,7 +821,7 @@ export async function createApp() {
       }
 
       // New workspace entry; legacy root remains stable for existing integrations/tests.
-      if (req.method === 'GET' && ['/workspace','/workspace.html','/workspace.mjs','/workspace.css','/workspace-permissions.mjs','/employee-self-ui.mjs','/customer-workbench.mjs','/foundation-import-ui.mjs','/organization-view.mjs','/hk-tools-ui.mjs'].includes(url.pathname)) {
+      if (req.method === 'GET' && ['/workspace','/workspace.html','/workspace.mjs','/workspace.css','/workspace-permissions.mjs','/employee-self-ui.mjs','/customer-workbench.mjs','/foundation-import-ui.mjs','/organization-view.mjs','/hk-tools-ui.mjs','/scope-tree.mjs','/organization-planning.mjs','/advanced-time-ui.mjs','/legacy-theme.css'].includes(url.pathname)) {
         const file = url.pathname === '/workspace' ? 'workspace.html' : url.pathname.slice(1);
         if (file.endsWith('.html')) {
           const nonce = randomBytes(16).toString('base64');
@@ -1123,6 +1125,26 @@ export async function createApp() {
         return json(res,404,{error:'E_TY_NOT_FOUND',message:'业务入口不存在'});
       }
 
+      if(url.pathname==='/api/organization/headcount'){
+        if(req.method==='GET')return await runRead(res,tx=>organizationPlanning.plans(tx,{userId:uid,groupId:url.searchParams.get('group_id'),period:url.searchParams.get('period')||'2026-11',asOf:url.searchParams.get('as_of')}));
+        if(req.method==='PUT'){const input=JSON.parse((await readBody(req)).toString('utf8'));return await runWrite(res,{actor:uid,action:'organization.headcount',subject:String(input.company_id),fn:tx=>organizationPlanning.savePlan(tx,{userId:uid,input})});}
+      }
+      if(url.pathname.startsWith('/api/time/')){
+        const args={userId:uid,groupId:url.searchParams.get('group_id'),period:url.searchParams.get('period')||'2026-10',ledgerId:url.searchParams.get('ledger_id'),companyId:url.searchParams.get('company_id'),self:url.pathname==='/api/time/my'||url.searchParams.get('self')==='true'};
+        if(req.method==='GET'&&['/api/time/report','/api/time/my'].includes(url.pathname))return await runRead(res,tx=>advancedTime.report(tx,args));
+        if(req.method==='GET'&&url.pathname==='/api/time/export.csv'){const content=await withTx(db,tx=>advancedTime.exportReport(tx,{...args,kind:url.searchParams.get('kind')}));res.writeHead(200,{...CSV_HEADERS,...SEC_HEADERS,'content-disposition':contentDisposition('tyhr-attendance.csv')});return res.end(content);}
+        if(['POST','PUT'].includes(req.method)){
+          let input;try{input=JSON.parse((await readBody(req)).toString('utf8'));}catch(e){if(e.code)throw e;throw bizErr('E_TY_ARGUMENT','Invalid JSON');}
+          const parts=url.pathname.split('/').filter(Boolean);let fn;
+          if(parts[2]==='changes'&&parts.length===3&&req.method==='POST')fn=tx=>advancedTime.createChange(tx,{userId:uid,input});
+          if(parts[2]==='changes'&&parts[4]==='decide'&&req.method==='POST')fn=tx=>advancedTime.decideChange(tx,{userId:uid,id:parts[3],input});
+          if(parts[2]==='corrections'&&req.method==='POST')fn=tx=>advancedTime.correctPunch(tx,{userId:uid,input});
+          if(parts[2]==='close'&&req.method==='POST')fn=tx=>advancedTime.closePeriod(tx,{userId:uid,input});
+          if(parts[2]==='shifts'&&parts.length===4&&req.method==='PUT')fn=tx=>advancedTime.saveShift(tx,{userId:uid,id:parts[3],input});
+          if(fn)return await runWrite(res,{actor:uid,action:'time.'+parts[2],subject:parts[3]||String(input.period),fn});
+        }
+        return json(res,404,{error:'E_TY_NOT_FOUND'});
+      }
       if (url.pathname.startsWith('/api/foundation/')) {
         const parts = url.pathname.slice('/api/foundation/'.length).split('/').filter(Boolean);
         if(parts[0]==='test-seed'&&parts.length===1&&req.method==='POST'){

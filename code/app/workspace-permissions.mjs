@@ -1,6 +1,6 @@
 // Navigation follows server-returned resource capabilities. Backend scope and
 // object authorization remain authoritative for every request.
-const PERSONAL = new Set(['my-payroll','my-training','my-leave']);
+const PERSONAL = new Set(['my-attendance','my-payroll','my-training','my-leave']);
 const CONFIG = new Set(['groups','grants','foundation-bridge','foundation-import','legacy-ledger','legacy-policy','legacy-exceptions','legacy-health','legacy-mcp']);
 const STRUCTURE = new Set(['brands','ledgers','organization','companies','departments','workareas','jobs','grades','positions','legacy-org']);
 const PEOPLE = new Set(['people','employments','assignments','legacy-employees']);
@@ -11,6 +11,8 @@ export function canOpenRoute(route,capabilities={}) {
   const resources=capabilities.resources||{},profile=capabilities.profile_code;
   const read=code=>!!resources[code]?.can_read,write=code=>!!resources[code]?.can_write;
   if(route==='home'||route==='legacy-roles')return true;
+  if(route==='my-attendance')return !!capabilities.has_person;
+  if(route.startsWith('time-'))return !['config_admin','store_staff','station_staff'].includes(profile)&&read('attendance_daily');
   if(PERSONAL.has(route))return !!capabilities.has_person&&read(route==='my-payroll'?'payslip':route==='my-leave'?'leave_request':'training_self');
   if(['store_staff','station_staff'].includes(profile)&&!['organization','people','employments','assignments'].includes(route))return false;
   if(profile==='store_manager'&&['customer-performance','legacy-contract','legacy-exit','legacy-severance','legacy-settlement'].includes(route))return false;

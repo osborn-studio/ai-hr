@@ -1,3 +1,6 @@
+import {renderPlanning} from './organization-planning.mjs';
+import {renderTime} from './advanced-time-ui.mjs';
+import {inContext,within} from './scope-tree.mjs';
 // 天意 HR 工作空间。基础资料使用新版 API；业务页面保留原授权边界。
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -38,13 +41,13 @@ const GROUP = '组织基础';
 const configs = {
   groups:{label:'集团',section:'平台基础',collection:'groups',endpoint:'groups',description:'集团是人员身份的统一范围；不同集团的数据分别授权。',note:'集团编码用于识别管理范围，名称可以调整。',fields:()=>codeName(),columns:[nameCol(),statusCol()]},
   brands:{label:'品牌',section:'平台基础',collection:'brands',endpoint:'brands',description:'统一维护品牌，同一地点下的不同品牌门店分别建档。',fields:()=>[groupField(),...codeName(),...regionCurrencyFields()],columns:[nameCol(),col('地区',r=>text(({CN:'中国内地',HK:'中国香港'})[r.region_code]||'待配置')),col('币种',r=>text(r.currency_code||'待配置')),col('集团',r=>ref('groups',r.group_id)),statusCol()]},
-  ledgers:{label:'业务帐套',section:'平台基础',collection:'ledgers',endpoint:'ledgers',description:'按集团、品牌或单店划定业务帐套范围。',note:'品牌帐套须选择品牌；门店帐套只能对应一家经营核算公司。',fields:()=>[groupField(),...codeName(),field('scope_mode','帐套范围','select',{required:true,options:options(['group','集团帐套'],['brand','品牌帐套'],['store','门店帐套'])}),field('brand_id','所属品牌','select',{source:'brands'}),...regionCurrencyFields()],columns:[nameCol(),col('地区',r=>text(({CN:'中国内地',HK:'中国香港'})[r.region_code]||'待配置')),col('币种',r=>text(r.currency_code||'待配置')),col('范围',r=>text(r.scope_mode==='store'?'门店帐套':enumLabels[r.scope_mode])),col('品牌',r=>ref('brands',r.brand_id)),col('集团',r=>ref('groups',r.group_id)),statusCol()]},
-  companies:{label:'门店公司',section:GROUP,collection:'companies',endpoint:'companies',description:'门店作为经营核算公司管理，公司内部另设部门；法定主体关系单独核实。',note:'经营核算公司与独立法人资格分别管理。请填写稳定编码，避免用商场或门店名称合并不同品牌。',fields:()=>[groupField(),field('ledger_id','业务帐套','select',{source:'ledgers',required:true}),field('brand_id','所属品牌','select',{source:'brands'}),...codeName(),field('company_kind','公司类型','select',{required:true,options:options(['store','门店公司'],['headquarters','总部公司'],['kitchen','中央厨房'])}),field('legal_name','已核实的法定主体名称','text',{placeholder:'未知时留空'}),field('address','地址','text',{wide:true})],columns:[nameCol(),col('品牌',r=>ref('brands',r.brand_id)),col('帐套',r=>ref('ledgers',r.ledger_id)),col('类型',r=>text(enumLabels[r.company_kind]||r.company_kind)),col('法定主体',r=>r.legal_name?text(r.legal_name):'<span class="badge pending">待核实</span>'),statusCol()]},
+  ledgers:{label:'业务帐套',section:'平台基础',collection:'ledgers',endpoint:'ledgers',description:'按集团、品牌或单店划定业务帐套范围。',note:'品牌帐套须选择品牌；门店帐套只能对应一家经营核算公司。',fields:()=>[groupField(),...codeName(),field('parent_ledger_id','上级集团帐','select',{source:'ledgers'}),field('scope_mode','帐套范围','select',{required:true,options:options(['group','集团帐套'],['brand','品牌帐套'],['store','门店帐套'])}),field('brand_id','所属品牌','select',{source:'brands'}),...regionCurrencyFields()],columns:[nameCol(),col('地区',r=>text(({CN:'中国内地',HK:'中国香港'})[r.region_code]||'待配置')),col('币种',r=>text(r.currency_code||'待配置')),col('范围',r=>text(r.scope_mode==='store'?'门店帐套':enumLabels[r.scope_mode])),col('品牌',r=>ref('brands',r.brand_id)),col('集团',r=>ref('groups',r.group_id)),statusCol()]},
+  companies:{label:'组织公司',section:GROUP,collection:'companies',endpoint:'companies',description:'集团、品牌公司、门店三层经营组织，每一层均可设部门和岗位。',note:'经营核算公司与独立法人资格分别管理。请填写稳定编码，避免用商场或门店名称合并不同品牌。',fields:()=>[groupField(),field('ledger_id','业务帐套','select',{source:'ledgers',required:true}),field('brand_id','所属品牌','select',{source:'brands'}),field('org_level','组织层级','select',{options:options(['group','集团'],['brand','品牌公司'],['store','门店'])}),field('parent_company_id','上级组织公司','select',{source:'companies'}),...codeName(),field('company_kind','公司类型','select',{required:true,options:options(['store','门店公司'],['headquarters','总部公司'],['kitchen','中央厨房'])}),field('legal_name','已核实的法定主体名称','text',{placeholder:'未知时留空'}),field('address','地址','text',{wide:true})],columns:[nameCol(),col('品牌',r=>ref('brands',r.brand_id)),col('帐套',r=>ref('ledgers',r.ledger_id)),col('类型',r=>text(enumLabels[r.company_kind]||r.company_kind)),col('法定主体',r=>r.legal_name?text(r.legal_name):'<span class="badge pending">待核实</span>'),statusCol()]},
   departments:{label:'部门',section:GROUP,collection:'departments',endpoint:'departments',description:'维护公司内部行政部门，父子部门须属于同一家公司。',fields:()=>[companyField(),field('parent_department_id','上级部门','select',{source:'departments'}),...codeName()],columns:[nameCol(),companyCol(),col('上级部门',r=>ref('departments',r.parent_department_id,'公司直属')),statusCol()]},
   workareas:{label:'档口与工作区',section:GROUP,collection:'work_areas',endpoint:'work-areas',description:'档口关联公司内部门，可作为部门化档口或部门内部工作区。',note:'部门化档口沿用一个部门的组织职责；部门内工作区保留所属部门。两种模式都不代替岗位。',fields:()=>[companyField(),field('department_id','归口部门','select',{source:'departments',required:true}),...codeName(),field('mode','档口模式','select',{required:true,options:options(['department_extension','部门化档口'],['work_area_in_department','部门内工作区'])})],columns:[nameCol(),companyCol(),col('归口部门',r=>ref('departments',r.department_id)),col('模式',r=>text(enumLabels[r.mode])),statusCol()]},
   jobs:{label:'标准岗位',section:GROUP,collection:'jobs',endpoint:'jobs',description:'集团统一的岗位目录，例如厨师、服务员、店长，与部门和系统权限角色分别管理。',fields:()=>[groupField(),...codeName(),field('job_family','岗位序列','text',{placeholder:'如：厨房、服务、管理'})],columns:[nameCol(),col('岗位序列',r=>text(r.job_family)),col('集团',r=>ref('groups',r.group_id)),statusCol()]},
   grades:{label:'职级',section:GROUP,collection:'grades',endpoint:'grades',description:'职级描述任职等级，独立于标准岗位和部门。',fields:()=>[groupField(),...codeName(),field('level','排序等级','number',{min:0,help:'用于职级排序，可留空'})],columns:[nameCol(),col('排序等级',r=>text(r.level)),col('集团',r=>ref('groups',r.group_id)),statusCol()]},
-  positions:{label:'公司岗位设置',section:GROUP,collection:'positions',endpoint:'positions',description:'把标准岗位设置到具体公司的部门，作为员工任职的组织位置。',fields:()=>[groupField(),companyField(),field('department_id','所属部门','select',{source:'departments',required:true}),field('job_id','标准岗位','select',{source:'jobs',required:true}),field('grade_id','参考职级','select',{source:'grades'}),...codeName()],columns:[nameCol(),companyCol(),col('部门',r=>ref('departments',r.department_id)),col('标准岗位',r=>ref('jobs',r.job_id)),col('职级',r=>ref('grades',r.grade_id)),statusCol()]},
+  positions:{label:'公司岗位设置',section:GROUP,collection:'positions',endpoint:'positions',description:'把标准岗位设置到具体公司的部门，作为员工任职的组织位置。',fields:()=>[groupField(),companyField(),field('department_id','所属部门','select',{source:'departments',required:true}),field('job_id','标准岗位','select',{source:'jobs',required:true}),field('parent_position_id','承接上级岗位','select',{source:'positions'}),field('grade_id','参考职级','select',{source:'grades'}),...codeName()],columns:[nameCol(),companyCol(),col('部门',r=>ref('departments',r.department_id)),col('标准岗位',r=>ref('jobs',r.job_id)),col('职级',r=>ref('grades',r.grade_id)),statusCol()]},
   people:{label:'人员档案',section:'人员与任职',collection:'people',endpoint:'people',description:'集团人员身份长期保留；跨店、调动或复聘时沿用原始人员编号。',note:'同名不代表同一人。人员编号一经分配不复用，复聘请在原档案下新增雇佣经历。',fields:()=>[groupField(),field('person_number','永久人员编号','text',{help:'新增时留空由系统分配；原编号不因调店而变化'}),field('full_name','姓名','text',{required:true})],columns:[col('人员',r=>`<span class="cell-title">${text(r.full_name)}</span><span class="cell-sub">${text(r.person_number)}</span>`),col('集团',r=>ref('groups',r.group_id)),col('雇佣记录',r=>String((state.data.employments||[]).filter(e=>same(e.person_id,r.id)).length)),statusCol()]},
   employments:{label:'雇佣经历',section:'人员与任职',collection:'employments',endpoint:'employments',description:'每次入职保存独立雇佣段；跨公司入职与短期跨店支援分别处理。',note:'离职日包含当天。复聘关联原已结束的雇佣经历，人员身份与编号保持不变。',fields:()=>[groupField(),field('person_id','人员','select',{source:'people',required:true}),companyField(),field('employment_type','用工类型','select',{required:true,options:options(['full_time','全职'],['part_time','兼职'],['hourly','小时工'],['outsourced','外包'],['FT','FT'],['PT','PT'],['LTPT','LTPT'])}),field('hire_date','入职日','date',{required:true}),field('leave_date','离职日','date',{help:'离职日当天仍计在雇佣范围'}),field('rehire_link','复聘关联原雇佣','select',{source:'employments'}),field('legal_subject_name','已核实的雇佣主体','text',{placeholder:'未知时留空'})],columns:[col('人员',r=>ref('people',r.person_id)),companyCol(),col('用工类型',r=>text(enumLabels[r.employment_type]||r.employment_type)),col('入职日',r=>date(r.hire_date)),col('离职日',r=>date(r.leave_date)),statusCol()]},
   assignments:{label:'任职记录',section:'人员与任职',collection:'assignments',endpoint:'assignments',description:'任职记录关联雇佣、公司岗位与部门，保留起止期间和主兼职信息。',note:'失效日为不再任职的第一天。例如任职至月底，失效日填写下月1日。同一雇佣的主任职期间不能重叠。',fields:()=>[groupField(),companyField(),field('employment_id','雇佣经历','select',{source:'employments',required:true}),field('department_id','任职部门','select',{source:'departments',required:true}),field('position_id','公司岗位','select',{source:'positions',required:true}),field('grade_id','人员职级','select',{source:'grades'}),field('work_area_id','档口或工作区','select',{source:'work_areas'}),field('valid_from','生效日','date',{required:true}),field('valid_to','失效日（不含当天）','date'),field('is_primary','任职性质','select',{required:true,options:options(['true','主任职'],['false','兼任'])})],columns:[col('人员 / 雇佣',r=>{const e=(state.data.employments||[]).find(e=>same(e.id,r.employment_id));return `${ref('people',e?.person_id)}<span class="cell-sub">${date(e?.hire_date)} 入职</span>`;}),companyCol(),col('部门 / 岗位',r=>`${ref('departments',r.department_id)}<span class="cell-sub">${ref('positions',r.position_id)}</span>`),col('档口',r=>ref('work_areas',r.work_area_id)),col('有效期',r=>`${date(r.valid_from)} 至 ${r.valid_to?date(r.valid_to):'持续'}`),col('性质',r=>r.is_primary?'主任职':'兼任'),statusCol()]},
@@ -61,13 +64,14 @@ const legacy = {
 };
 const navGroups = [
   ['概览',[['home','工作台','▦']]],
-  ['组织基础',[['organization','组织全景','⌘'],['companies','门店公司','□'],['departments','部门','⌘'],['workareas','档口与工作区','◇'],['jobs','标准岗位','◫'],['grades','职级','≡'],['positions','公司岗位设置','⊞'],['legacy-org','组织机构图','⌘'],['legacy-headcount','编制管理','▦']]],
+  ['组织基础',[['organization','组织全景','⌘'],['companies','组织公司','□'],['departments','部门','⌘'],['workareas','档口与工作区','◇'],['jobs','标准岗位','◫'],['grades','职级','≡'],['positions','公司岗位设置','⊞'],['legacy-org','组织机构图','⌘'],['legacy-headcount','编制管理','▦']]],
   ['人员与任职',[['people','人员档案','○'],['employments','雇佣经历','↗'],['assignments','任职记录','◷'],['legacy-employees','兼容员工档案','▣'],['legacy-contract','人事合同','▤'],['legacy-exit','离职交接','↗'],['legacy-severance','离职结算','≡']]],
-  ['考勤排班',[['legacy-roster','排班','▤'],['legacy-punch','打卡','◉'],['legacy-attendance','考勤人日','▥'],['legacy-attx','考勤异常','!'],['legacy-att','考勤月报','▥'],['legacy-close','考勤封账','⊡'],['legacy-leave','假期额度','◴'],['legacy-leavereq','请假单','◻'],['legacy-cashout','年假与折现','◴']]],
+  ['考勤排班',[['time-calendar','排班','▤'],['time-segments','班段与打卡','◉'],['time-daily','考勤日报','▥'],['time-exceptions','考勤异常','!'],['time-monthly','考勤月报','▥'],['time-changes','换班与借调','⊡'],['legacy-leave','假期额度','◴'],['legacy-leavereq','请假单','◻'],['legacy-cashout','年假与折现','◴']]],
   ['薪酬管理',[['customer-payroll','薪酬核算','▤'],['hk-tools','香港用工与日薪','◷'],['legacy-payroll','算薪工作台','▤'],['legacy-payslip','工资条','▧'],['legacy-salaryitem','工资项目','＋'],['legacy-adjust','工资调整','↗'],['legacy-paypolicy','薪酬政策','≡'],['legacy-siledger','社保台账','▣'],['legacy-declare','申报表','▥'],['legacy-settlement','外包结算','□']]],
   ['招聘与发展',[['legacy-recruit','招聘','○'],['customer-performance','绩效考核','◇'],['legacy-perf','绩效','◇'],['legacy-training','培训与考试','▱']]],
   ['经营分析',[['legacy-dashboard','数据看板','▥'],['legacy-report','报表','▤']]],
-  ['个人工作',[['my-payroll','我的工资','▧'],['my-leave','我的假期','◴'],['my-training','我的培训与考试','▱'],['legacy-home','原业务工作台','▦'],['legacy-approval','待办审批','✓'],['legacy-roles','我的权限','◈']]],
+  ['个人工作',[['my-attendance','我的考勤','◷'],['my-payroll','我的工资','▧'],['my-leave','我的假期','◴'],['my-training','我的培训与考试','▱'],['legacy-home','原业务工作台','▦'],['legacy-approval','待办审批','✓'],['legacy-roles','我的权限','◈']]],
+  ['兼容排班工具',[['legacy-roster','原排班操作','▤'],['legacy-punch','原打卡采集','◉'],['legacy-attendance','原考勤明细','▥'],['legacy-att','原考勤月报','▥'],['legacy-close','原考勤封账','⊡'],['legacy-attx','原异常处理','!']]],
   ['平台管理',[['groups','集团','⊞'],['brands','品牌','◇'],['ledgers','业务帐套','▣'],['grants','基础资料授权','⌘'],['foundation-bridge','业务接续','⇄'],['foundation-import','花名册导入','⇧'],['legacy-ledger','原业务帐套与账号','▣'],['legacy-policy','业务制度','≡'],['legacy-exceptions','业务例外','!'],['legacy-health','运行自检','◉'],['legacy-mcp','AI开放接口','⌁']]],
 ];
 
@@ -110,7 +114,7 @@ function renderContexts(){
   const d=state.data,c=state.context;
   c.group_id=makeContextOptions('#groupContext',d.groups||[],'选择集团',c.group_id);
   c.ledger_id=makeContextOptions('#ledgerContext',(d.ledgers||[]).filter(r=>!c.group_id||same(r.group_id,c.group_id)),'全部授权帐套',c.ledger_id);
-  c.company_id=makeContextOptions('#companyContext',(d.companies||[]).filter(r=>(!c.group_id||same(r.group_id,c.group_id))&&(!c.ledger_id||same(r.ledger_id,c.ledger_id))),'全部授权公司',c.company_id);
+  c.company_id=makeContextOptions('#companyContext',(d.companies||[]).filter(r=>(!c.group_id||same(r.group_id,c.group_id))&&(!c.ledger_id||within(d.ledgers||[],r.ledger_id,c.ledger_id,'parent_ledger_id'))),'全部授权公司',c.company_id);
   rememberContext();
 }
 function renderNavigation(){
@@ -143,10 +147,12 @@ async function renderPage(){
   if(!canOpenRoute(route,state.permissions)){
     $('#breadcrumb').innerHTML='<b>当前岗位权限</b>';container.innerHTML='<section class="card"><h2>当前账号未开放此功能</h2><p class="muted">请从左侧菜单进入已授权的业务。</p><a href="#home">返回工作台</a></section>';return;
   }
-  const isLegacy=route.startsWith('legacy-');
+  const isLegacy=route.startsWith('legacy-')&&!['legacy-org','legacy-headcount'].includes(route);
   $('.contextbar').classList.toggle('legacy-context',isLegacy);
   ['#groupContext','#ledgerContext','#companyContext'].forEach(k=>$(k).disabled=isLegacy);
   $('#contextHelp').textContent=isLegacy?'兼容业务使用原授权范围':'基础资料按当前范围显示';
+  if(route==='organization'||route==='legacy-org'||route==='legacy-headcount'){ $('#breadcrumb').innerHTML='<b>组织与编制</b>';return renderPlanning({kind:route==='legacy-headcount'?'headcount':'structure',container,bootstrap:state.data,context:state.context,request,toast,isCurrent:()=>id===state.loadId});}
+  if(route.startsWith('time-')||route==='my-attendance'){ $('#breadcrumb').innerHTML='<b>排班与考勤</b>';return renderTime({kind:route==='my-attendance'?'calendar':route.slice(5),self:route==='my-attendance',container,bootstrap:state.data,context:state.context,request,token:state.token,toast,isCurrent:()=>id===state.loadId});}
   if(route==='home'){$('#breadcrumb').innerHTML='<b>工作台</b>';renderHome();return;}
   if(['my-payroll','my-training','my-leave'].includes(route)){$('#breadcrumb').innerHTML=`<b>${route==='my-payroll'?'我的工资':route==='my-leave'?'我的假期':'我的培训与考试'}</b>`;return renderEmployeeSelf({kind:route==='my-payroll'?'pay':route==='my-leave'?'leave':'training',container,request,me:state.me,token:state.token,toast,capabilities:state.permissions,isCurrent:()=>id===state.loadId});}
   if(route==='hk-tools'){$('#breadcrumb').innerHTML='<b>香港用工与日薪</b>';return renderHKTools({container,bootstrap:state.data,context:state.context,token:state.token,request,toast,isCurrent:()=>id===state.loadId});}
@@ -195,7 +201,7 @@ function renderHome(){
 
 function getRows(config){
   let rows=[...activeCollection(config.collection)];
-  if(config.collection==='companies')rows=rows.filter(r=>(!state.context.ledger_id||same(r.ledger_id,state.context.ledger_id))&&(!state.context.company_id||same(r.id,state.context.company_id)));
+  if(config.collection==='companies')rows=rows.filter(r=>inContext(state.data,r,state.context));
   const q=state.query.trim().toLocaleLowerCase();
   if(q)rows=rows.filter(r=>Object.values(r).some(v=>v!==null&&typeof v!=='object'&&String(v).toLocaleLowerCase().includes(q))||config.columns.some(c=>c.render(r).replace(/<[^>]*>/g,'').toLocaleLowerCase().includes(q)));
   return rows;
@@ -248,9 +254,12 @@ function sourceOptions(f,values){
   let rows=activeCollection(f.source);const group=values.group_id||state.context.group_id,company=values.company_id,department=values.department_id;
   if(f.key==='rehire_link'&&state.editor?.rehireCandidates)rows=state.editor.rehireCandidates;
   if(group&&f.source!=='groups')rows=rows.filter(r=>r.group_id===undefined||same(r.group_id,group));
-  if(f.source==='companies'&&values.ledger_id)rows=rows.filter(r=>same(r.ledger_id,values.ledger_id));
-  if(company&&f.key!=='rehire_link'&&['departments','work_areas','positions','employments'].includes(f.source))rows=rows.filter(r=>same(r.company_id,company));
-  if(department&&['work_areas','positions'].includes(f.source))rows=rows.filter(r=>same(r.department_id,department));
+  if(f.source==='companies'&&values.ledger_id&&f.key!=='parent_company_id')rows=rows.filter(r=>same(r.ledger_id,values.ledger_id));
+  if(f.key==='parent_company_id'){rows=rows.filter(r=>!same(r.id,state.editor?.row?.id)&&((values.org_level==='brand'&&r.org_level==='group')||(values.org_level==='store'&&r.org_level==='brand'&&(!values.brand_id||same(r.brand_id,values.brand_id)))||!values.org_level));}
+  if(f.key==='parent_ledger_id')rows=rows.filter(r=>r.scope_mode==='group'&&!r.parent_ledger_id&&!same(r.id,state.editor?.row?.id));
+  if(f.key==='parent_position_id'){const c=activeCollection('companies').find(c=>same(c.id,company));rows=rows.filter(r=>same(r.company_id,c?.parent_company_id)&&(!values.job_id||same(r.job_id,values.job_id)));}
+  if(company&&f.key!=='parent_position_id'&&f.key!=='rehire_link'&&['departments','work_areas','positions','employments'].includes(f.source))rows=rows.filter(r=>same(r.company_id,company));
+  if(department&&f.key!=='parent_position_id'&&['work_areas','positions'].includes(f.source))rows=rows.filter(r=>same(r.department_id,department));
   if(f.key==='parent_department_id'&&state.editor?.row)rows=rows.filter(r=>!same(r.id,state.editor.row.id));
   if(f.key==='rehire_link'){rows=rows.filter(r=>(r.status==='ended'||r.leave_date)&&(!values.person_id||same(r.person_id,values.person_id))&&(!state.editor?.row||!same(r.id,state.editor.row.id)));}
   return rows;
@@ -265,7 +274,7 @@ function renderEditorFields(values){
     let control;
     if(f.type==='select'){
       let os=f.options||sourceOptions(f,values).map(r=>({value:String(r.id),label:selectionLabel(f.source,r)}));
-      if(v!==''&&!os.some(o=>same(o.value,v))&&f.options)os=[...os,{value:String(v),label:String(v)}];
+      if(v!==''&&!os.some(o=>same(o.value,v))&&(f.options||['parent_company_id','parent_ledger_id','parent_position_id'].includes(f.key)))os=[...os,{value:String(v),label:String(v)}];
       const lockedGroup=f.key==='group_id'&&(state.context.group_id||(row&&key==='people'));
       control=`<select id="${id}" name="${f.key}"${required}${lockedGroup?' disabled':''}><option value="">${f.required?'请选择':'不指定'}</option>${os.map(o=>`<option value="${esc(o.value)}" ${same(o.value,v)?'selected':''}>${esc(o.label)}</option>`).join('')}</select>`;
     }else control=`<input id="${id}" name="${f.key}" type="${f.type}" value="${esc(f.type==='date'?String(v).slice(0,10):v)}"${required}${f.min!==undefined?` min="${f.min}"`:''}${f.placeholder?` placeholder="${esc(f.placeholder)}"`:''}${row&&key==='people'&&f.key==='person_number'?' readonly':''}>`;
@@ -275,6 +284,7 @@ function renderEditorFields(values){
     const currentEditor=state.editor;
     let next=editorValues();
     const clear=(...keys)=>keys.forEach(k=>next[k]='');
+    if(s.name==='org_level')clear('parent_company_id');
     if(s.name==='group_id')clear('ledger_id','brand_id','company_id','person_id','department_id','parent_department_id','position_id','grade_id','job_id','employment_id','work_area_id','rehire_link');
     if(s.name==='ledger_id'){
       clear('company_id','department_id','parent_department_id','position_id','employment_id','work_area_id');
@@ -371,7 +381,7 @@ $('#editorForm').onsubmit=saveEditor;
     state.page=1;state.query='';rememberContext();await runRefresh();
   };
 });
-function readRoute(){const key=(location.hash.slice(1).split('/')[0]||'home');return key==='home'||configs[key]||['my-payroll','my-training','my-leave','customer-payroll','customer-performance','foundation-bridge','foundation-import','organization','hk-tools'].includes(key)||(key.startsWith('legacy-')&&legacy[key.slice(7)])?key:'home';}
+function readRoute(){const key=(location.hash.slice(1).split('/')[0]||'home');return key==='home'||configs[key]||key.startsWith('time-')||['my-attendance','my-payroll','my-training','my-leave','customer-payroll','customer-performance','foundation-bridge','foundation-import','organization','hk-tools'].includes(key)||(key.startsWith('legacy-')&&legacy[key.slice(7)])?key:'home';}
 window.addEventListener('hashchange',()=>{state.route=readRoute();state.page=1;state.query='';$('#workspace').classList.remove('nav-open');if(state.token){renderNavigation();renderPage();}});
 state.route=readRoute();
 if(state.token)enter().catch(error=>showLogin(error.message));else showLogin();
