@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:legacy && npm run test:new",
+    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:frontend",
     "test:db": "node test/run.mjs",
     "test:api": "node test/api.test.mjs",
     "test:scope": "node test/station-scope.mjs",
@@ -65,7 +65,10 @@
     "test:frontend-ui": "npm run test:ui --workspace frontend",
     "check:frontend": "npm run check --workspace frontend",
     "test:cloud": "node --test test/cloud-port.test.mjs test/cloud-http.test.mjs",
-    "test:leave": "node test/advanced-leave.test.mjs && node --test test/advanced-leave-law.test.mjs && node test/advanced-leave-security.test.mjs"
+    "test:leave": "node test/advanced-leave.test.mjs && node --test test/advanced-leave-law.test.mjs && node test/advanced-leave-security.test.mjs && node test/advanced-leave-native.test.mjs",
+    "test:platform": "node test/platform.test.mjs && node test/authz.test.mjs && node test/integration.test.mjs && node test/platform-leave.test.mjs",
+    "test:people-services": "node test/people-services.test.mjs && node test/people-services-native.test.mjs",
+    "test:leave-lifecycle": "node test/leave-lifecycle.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16"

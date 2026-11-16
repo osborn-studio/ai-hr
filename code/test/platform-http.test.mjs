@@ -1,0 +1,63 @@
+import assert from'node:assert/strict';
+import{randomBytes}from'node:crypto';
+import{createCloudApp}from'../app/cloud-server.mjs';
+import{withTx}from'../app/db.mjs';
+import{hashPassword}from'../app/services/auth.mjs';
+if(!process.env.DATABASE_URL)throw new Error('Requires an isolated empty PostgreSQL database');
+process.env.TYHR_DATA_MODE='postgres';
+const app=await createCloudApp(),db=app.db;let checks=0,key=0;
+const check=(label,value)=>{assert.ok(value,label);checks++;console.log('PASS '+label);};
+const q=async(s,a=[])=>(await db.query(s,a)).rows;
+try{
+ check('no implicit demo import',(await q('SELECT count(*)::int n FROM ty_group'))[0].n===0);
+ const group=(await q("INSERT INTO ty_group(code,name)VALUES('PLATFORM-HTTP','虚构平台接口集团')RETURNING *"))[0];
+ const ledger=(await q("INSERT INTO ty_ledger(group_id,scope_mode,code,name)VALUES($1,'group','L','虚构集团帐')RETURNING *",[group.id]))[0];
+ const company=(await q("INSERT INTO ty_company(group_id,ledger_id,code,name)VALUES($1,$2,'STORE','虚构测试店')RETURNING *",[group.id,ledger.id]))[0];
+ const passwords=[randomBytes(18).toString('base64url'),randomBytes(18).toString('base64url')];
+ await withTx(db,async t=>{
+  await t.query("INSERT INTO sys_data_scope(id,name,combinator)VALUES(94501,'平台HTTP隔离范围','intersection')");
+  for(const [index,login]of['platform_http_designer','platform_http_reviewer'].entries()){
+   const uid=94501+index;await t.query('INSERT INTO sys_account(id,login,display_name)OVERRIDING SYSTEM VALUE VALUES($1,$2,$3)',[uid,login,'虚构平台人员'+index]);
+   await t.query("INSERT INTO sys_user_role(user_id,role_id,data_scope_id,effective_from,grant_kind,grant_reason)VALUES($1,10,94501,'2000-01-01','ROLE','fictional HTTP fixture')",[uid]);
+   await t.query('SELECT fn_credential_set($1,$2,false)',[uid,hashPassword(passwords[index])]);
+   await t.query("INSERT INTO ty_test_account_profile(account_id,group_id,profile_code,seed_version)VALUES($1,$2,'group_hr_director','PLATFORM-HTTP')",[uid,group.id]);
+   await t.query("INSERT INTO ty_access_grant(account_id,group_id,can_read,can_write,valid_from)VALUES($1,$2,true,true,'2000-01-01')",[uid,group.id]);
+  }
+ });
+ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${app.server.address().port}`;
+ const tokens=[];for(const[index,login]of['platform_http_designer','platform_http_reviewer'].entries())tokens.push((await(await fetch(base+'/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({login,password:passwords[index]})})).json()).token);
+ const post=async(kind,name,input={},actor=0,operationId)=>{const response=await fetch(`${base}/api/v2/${kind}/${name}`,{method:'POST',headers:{authorization:`Bearer ${tokens[actor]}`,'content-type':'application/json',...(kind==='command'?{'idempotency-key':operationId||`platform-http-${++key}`}:{})},body:JSON.stringify(input)});return{status:response.status,body:await response.json()};};
+ const command=async(name,input,actor=0,op)=>{const result=await post('command','system.'+name,input,actor,op);assert.equal(result.status,200,JSON.stringify({name,error:result.body.error,message:result.body.message}));return result.body;};
+ const graph={nodes:[{id:'s',type:'start',next:'a'},{id:'a',type:'approval',mode:'any',approver_ids:[94502],next:'e'},{id:'e',type:'end'}]};
+ const w=(await command('workflow.save',{group_id:group.id,code:'http',name:'虚构HTTP审批',graph})).workflow;
+ check('HTTP cannot publish own workflow',(await post('command','system.workflow.publish',{id:w.id,expected_revision:1})).status===403);
+ await command('workflow.publish',{id:w.id,expected_revision:1},1);
+ const form=(await command('form.save',{group_id:group.id,code:'http_form',name:'虚构报修申请',workflow_id:w.id,schema:{fields:[{key:'description',label:'报修情况',type:'text',required:true}]}})).form;
+ await command('form.publish',{id:form.id,expected_revision:1},1);
+ const instance=(await command('instance.submit',{form_id:form.id,company_id:company.id,title:'虚构水龙头维修',values:{description:'虚构宿舍滴水'}})).instance;
+ const tasks=await post('query','system.workspace',{kind:'portal',view:'tasks',group_id:group.id},1);check('real HTTP portal only returns assigned current tasks',tasks.status===200&&tasks.body.rows.length===1&&Number(tasks.body.rows[0].instance_id)===Number(instance.id));
+ const decided=await command('instance.decide',{task_id:tasks.body.rows[0].id,expected_revision:tasks.body.rows[0].revision,approve:true,reason:'虚构核验通过'},1);
+ check('approved HTTP instance waits for explicit business execution',decided.instance.status==='approved'&&decided.instance.business_state==='pending');
+ const executed=await command('instance.execute',{instance_id:instance.id,expected_revision:decided.instance.revision},1);check('execute records ordinary form completion without fake external posting',executed.instance.business_state==='not_applicable');
+ const createInput={group_id:group.id,login:'platform_http_new_operator',display_name:'虚构新增HR',profile_code:'hr_staff',company_id:company.id};
+ const created=await command('operator.create',createInput,0,'platform-http-create-operator');check('real operator creation returns credential once',typeof created.credential_once==='string');
+ const replay=await command('operator.create',createInput,0,'platform-http-create-operator');check('replay never returns plaintext credential',replay.replayed&&!('credential_once'in replay)&&replay.credential_available===false);
+ const role=(await command('role.save',{group_id:group.id,code:'form_applicant',name:'虚构申请角色'})).role;
+ await command('grant.save',{group_id:group.id,subject_type:'role',role_id:role.id,resource:'workflow_self',actions:['read','submit'],company_id:company.id,fields_allow:['*'],reason:'虚构本人表单授权'});
+ const membership=(await command('role.assign',{group_id:group.id,role_id:role.id,account_id:created.operator.id,company_id:company.id,reason:'虚构岗位分配'})).membership;
+ const newLogin=await fetch(base+'/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({login:createInput.login,password:created.credential_once})});const loginResult=await newLogin.json();tokens.push(loginResult.token);
+ check('created operator authenticates with required credential change',newLogin.status===200&&(await post('query','system.workspace',{kind:'portal',group_id:group.id},2)).status===428);
+ const changed=await fetch(base+'/api/me/password',{method:'POST',headers:{authorization:`Bearer ${tokens[2]}`,'content-type':'application/json'},body:JSON.stringify({oldPassword:created.credential_once,newPassword:randomBytes(18).toString('base64url')})});check('new operator changes password through original strong session guard',changed.status===200);
+ const boot=await fetch(base+'/api/foundation/bootstrap',{headers:{authorization:`Bearer ${tokens[2]}`}});const directory=await boot.json();assert.equal(boot.status,200,JSON.stringify({error:directory.error,message:directory.message}));check('managed account bootstrap supplies directory without full HR history',directory.capabilities.directory_only&&directory.employments.length===0&&directory.accounts.length===0);
+ const forms=await post('query','system.workspace',{kind:'portal',view:'forms',group_id:group.id,company_id:company.id},2);check('ordinary operator uses own form catalogue without workflow design access',forms.status===200&&forms.body.rows.some(f=>Number(f.id)===Number(form.id))&&!forms.body.capabilities.can_design_forms);
+ check('ordinary operator cannot read form designer',(await post('query','system.workspace',{kind:'forms',group_id:group.id,company_id:company.id},2)).status===403);
+ const forbiddenLegacy=await fetch(base+'/api/customer-payroll/batches',{headers:{authorization:`Bearer ${tokens[2]}`}});check('native grant account cannot bypass through legacy business route',forbiddenLegacy.status===403);
+ check('coarse v2 adapter cannot bypass native complete grants',(await post('query','payroll.batches',{group_id:group.id},2)).status===403);
+ const own=(await command('instance.submit',{form_id:form.id,company_id:company.id,title:'虚构员工报修',values:{description:'虚构灯泡损坏'}},2)).instance;check('ordinary typed command uses authenticated original applicant',Number(own.applicant_id)===Number(created.operator.id));
+ await command('role.revoke_member',{membership_id:membership.id,expected_revision:membership.revision,reason:'虚构岗位撤销测试'});
+ check('membership revoke immediately blocks existing authenticated session business',(await post('query','system.workspace',{kind:'portal',view:'forms',group_id:group.id,company_id:company.id},2)).status===403);
+ const connection=(await command('integration.save',{group_id:group.id,provider:'feishu',code:'http_integration',name:'虚构飞书配置',status:'draft',config:{}})).connection;
+ const validation=await command('integration.validate',{connection_id:connection.id});check('integration validation truthfully reports no external connection',validation.network_verified===false&&validation.sent===false);
+ check('HTTP integration catalogue never returns encrypted material',(await post('query','system.workspace',{kind:'integrations',view:'connections',group_id:group.id})).body.rows.every(r=>!('secret_cipher'in r)&&!('secret_iv'in r)));
+ console.log(`Actual PostgreSQL + Node platform HTTP: ${checks}/${checks} passed`);
+}finally{if(app.server.listening)await new Promise(r=>{app.server.closeAllConnections();app.server.close(r);});await db.close();}
