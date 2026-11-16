@@ -6,7 +6,7 @@
 
 - 已有可运行的Node服务、PostgreSQL/PGlite数据层和虚构测试帐套；现有功能与回归说明见[运行基线](docs/runtime/workspace.md)。
 - 已统一总体及各专项设计；设计目录中的页面、接口和验收项是开发规格，不能视为已经实现。
-- 正在迁移到React前端、单Node进程托管、单部署数据库及逻辑帐套架构；迁移进展见[开发进度](docs/development-status.md)。
+- React前端、单Node托管、PostgreSQL与领域REST/Broker端口已建立。首批接入组织花名册、薪酬和高级假期；其余模块继续按[全模块清单](docs/module-acceptance.md)开发。
 - 测试组织仅使用天意集团、香香鱼米、大富烤肉及中文假名。客户原件、数据库、口令、环境文件、研究中间件不进入仓库。
 
 ## 设计与开发
@@ -18,18 +18,20 @@
 
 ## 本地启动与检查
 
-需要Node.js 22或以上。当前原应用命令：
+需要Node.js 22.12或以上。安装、构建及检查：
 
 ```sh
 cd code
 npm ci
+npm run build
 npm run test:new
-npm run serve
+npm run test:cloud
+npm run test:leave
 ```
 
-`DATABASE_URL`连接真实PostgreSQL；未配置时原应用使用PGlite，内存模式重启会清空，持久模式须显式配置目录。生产部署将要求显式数据连接，不能依赖默认演示数据。
+配置部署环境变量后使用`npm start`；也可按`.env.example`配置本地`.env`，运行`node --env-file=.env app/cloud-server.mjs`。正式入口要求显式PostgreSQL/Broker连接，核心空库不会自动建立演示用户或帐套。
 
-当前工作台`/workspace`；存活及就绪探针`/livez`、`/readyz`。账号初始化按[演示角色](docs/runtime/demo-roles.md)显式确认虚构环境，初始口令由本地安全配置提供，不在仓库公布。
+React工作台为`/`；存活及就绪探针`/livez`、`/readyz`。账号与演示数据必须显式初始化，初始口令由本地安全配置提供，不在仓库公布。原`serve`和`/workspace`保留供原业务验证，默认PGlite内存模式重启清空，不能用于生产。
 
 ## 云端复制边界
 

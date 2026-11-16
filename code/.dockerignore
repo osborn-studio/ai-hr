@@ -8,3 +8,10 @@ test
 Dockerfile
 compose.yaml
 .dockerignore
+
+dist
+.env
+.env.*
+.runtime
+coverage
+frontend/test

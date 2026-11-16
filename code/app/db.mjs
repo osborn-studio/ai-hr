@@ -131,7 +131,7 @@ async function createPgDb(url) {
       // ★ 空库上这条函数还不存在（001 才建它）。**不要**因此把连接标记成已初始化：
       //   否则建库之后这条连接会被永远当成"初始化过"，而它其实什么都没有。
       //   只吞"函数不存在"，其他错误照抛 —— 吞掉连接错误会让后面每一步都怪到别处。
-      if (!/app_init_session/.test(String(e.message))) throw e;
+      if (e.code !== '42883' || !/app_init_session/.test(String(e.message))) throw e;
     }
   }
 
@@ -158,8 +158,13 @@ async function createPgDb(url) {
     // 取一条连接，用完归还；调用方负责 release
     _checkout: async () => {
       const client = await pool.connect();
-      await initOnce(client);
-      return client;
+      try {
+        await initOnce(client);
+        return client;
+      } catch (error) {
+        client.release();
+        throw error;
+      }
     },
     initSession: async () => {
       const c = await pool.connect();
@@ -206,11 +211,15 @@ export async function withTx(db, fn) {
     //   `relation "pg_temp.tmp_scope_org" does not exist` —— 15 条路由偶发 500，
     //   而重跑一遍又全绿。临时表是整套行闸的地基，地基不能"通常还在"。
     //   代价是每个事务多一条 SELECT（幂等，IF NOT EXISTS），这是值得付的。
-    await client.query('SELECT app_init_session()');
-    return run(
-      { query: (s, p) => client.query(s, p), exec: (s) => client.query(s) },
-      () => client.release(),
-    );
+    try {
+      await client.query('SELECT app_init_session()');
+      return await run(
+        { query: (s, p) => client.query(s, p), exec: (s) => client.query(s) },
+        null,
+      );
+    } finally {
+      client.release();
+    }
   }
 
   // PGlite：整段事务占住唯一那条连接

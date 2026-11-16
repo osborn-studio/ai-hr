@@ -57,12 +57,26 @@
     "test:advanced-time": "node test/advanced-time.test.mjs",
     "init:organization-demo": "node tools/init-organization-demo.mjs --confirm-synthetic",
     "test:outsourcing": "node test/outsourcing.test.mjs",
-    "init:outsourcing-demo": "node tools/init-outsourcing-demo.mjs --confirm-synthetic"
+    "init:outsourcing-demo": "node tools/init-outsourcing-demo.mjs --confirm-synthetic",
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "start": "node app/cloud-server.mjs",
+    "test:frontend": "npm run test --workspace frontend",
+    "test:frontend-ui": "npm run test:ui --workspace frontend",
+    "check:frontend": "npm run check --workspace frontend",
+    "test:cloud": "node --test test/cloud-port.test.mjs test/cloud-http.test.mjs",
+    "test:leave": "node test/advanced-leave.test.mjs && node --test test/advanced-leave-law.test.mjs && node test/advanced-leave-security.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16"
   },
   "optionalDependencies": {
     "pg": "^8.23.1"
+  },
+  "workspaces": [
+    "frontend"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
   }
 }
