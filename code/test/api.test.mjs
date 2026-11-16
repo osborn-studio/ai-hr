@@ -3001,6 +3001,14 @@ if (payrollGrant) {
     // ★ 只记 4 学时（课程标准 8）：一来正好验"学时不够不结业"，
     //   二来 attended 可以删干净 —— completed 是证据，触发器不许删。
     //   真正验"结业"的留给库层（test/run.mjs 的 SUITE.TR）。
+    // 前面的生命周期场景已让 person=1 于3月20日离职；不能再让他报名6月培训。
+    // 独立虚构员工明确在培训日受雇于主体1、归属A店，保持本组只验证培训链。
+    const trainingPerson = Number((await db.query(`INSERT INTO person(id,full_name)
+      SELECT COALESCE(max(id),0)+1,'虚构培训接口学员' FROM person RETURNING id`)).rows[0].id);
+    const trainingEmployment = Number((await db.query(`INSERT INTO employment(id,person_id,legal_entity_id,hire_date)
+      SELECT COALESCE(max(id),0)+1,$1,1,'2026-01-01' FROM employment RETURNING id`, [trainingPerson])).rows[0].id);
+    await db.query(`INSERT INTO employee_org_assignment(employee_id,dim_code,org_id,valid_from)
+      VALUES($1,'cost_org',10,'2026-01-01')`, [trainingPerson]);
     const code = `TR-API-${Date.now()}`;
     const nm = encodeURIComponent('接口验收·安全培训');
     let courseId = 0, sessionId = 0, enrollId = 0, ra = { status: 0, body: {} };
@@ -3011,7 +3019,7 @@ if (payrollGrant) {
       + '&from=09:00&to=17:00&hours=8&trainer=' + encodeURIComponent('王教官')
       + '&place=' + encodeURIComponent('A店三楼') + '&capacity=20', t1);
     sessionId = Number(rs.body && rs.body.id) || 0;
-    const re = await post(`/api/training/enroll?session=${sessionId}&employee=1`, t1);
+    const re = await post(`/api/training/enroll?session=${sessionId}&employee=${trainingPerson}`, t1);
     enrollId = Number((re.body && re.body.enrolled && re.body.enrolled[0]) || 0);
     ra = await post(`/api/training/attend?enroll=${enrollId}&hours=4`, t1);
 
@@ -3032,6 +3040,9 @@ if (payrollGrant) {
     if (enrollId > 0) await db.query(`DELETE FROM training_enrollment WHERE id=$1`, [enrollId]);
     if (sessionId > 0) await db.query(`DELETE FROM training_session WHERE id=$1`, [sessionId]);
     if (courseId > 0) await db.query(`DELETE FROM training_course WHERE id=$1`, [courseId]);
+    await db.query('DELETE FROM employee_org_assignment WHERE employee_id=$1', [trainingPerson]);
+    await db.query('DELETE FROM employment WHERE id=$1', [trainingEmployment]);
+    await db.query('DELETE FROM person WHERE id=$1', [trainingPerson]);
   }
 
   { // TR8 没有花名册写权限 → 403（权限先于业务判断，不是 500，也不是静默成功）

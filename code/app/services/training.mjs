@@ -9,93 +9,104 @@
 //   结业由 fn_training_attend 按"到场学时 >= 课程标准学时"判定。
 //   一旦开了"人工通过"，这个字段迟早全是"通过"，而它是要拿去应付检查的。
 // ============================================================================
-import { requireSession } from './guard.mjs';
+import { requireSession, requireOrg } from './guard.mjs';
+import { inStationScope } from './scope.mjs';
 import { bizErr } from '../errors.mjs';
+import { accountPerson } from './persona-guard.mjs';
 
-export const RESOURCES = { read: 'employee_roster', write: 'employee_roster' };
+export const RESOURCES = { read: 'training_manage', write: 'training_manage' };
 
 const CATS = ['safety', 'onboarding', 'skill', 'compliance'];
 const isId = (v) => Number.isInteger(v) && v > 0;
 
-/**
- * 看板：课程 + 场次（含报名统计）+ 年度学时缺口。
- * @param {number} year 统计年度（默认业务年度）
- */
+// The session belongs to a payroll entity. People are additionally constrained
+// by the existing cost/station roster scope on that session's business date.
+// Never aggregate a person's unrestricted training history after a current-only
+// visibility check: employees may have moved between stores or employers.
+const entityVisible = entity => `EXISTS (SELECT 1 FROM pg_temp.tmp_scope_entity se
+  WHERE se.dim_code='payroll_legal_entity' AND se.entity_id=${entity})
+  AND NOT EXISTS (SELECT 1 FROM pg_temp.tmp_scope_deny sd
+    WHERE sd.dim_code='payroll_legal_entity' AND sd.entity_id=${entity})`;
+const personVisible = (person, on, entity, user) => `${entityVisible(entity)}
+  AND ${inStationScope(person,user,on)}
+  AND EXISTS (SELECT 1 FROM employment em_scope WHERE em_scope.person_id=${person}
+    AND em_scope.legal_entity_id=${entity}
+    AND daterange(em_scope.hire_date,em_scope.leave_date,'[]') @> ${on})`;
+const sessionDay = alias => `(${alias}.starts_at AT TIME ZONE app_tz())::date`;
+async function businessYear(tx,year) {
+  const y=year===undefined||year===null||year===''?Number((await tx.query('SELECT EXTRACT(year FROM app_today()) y')).rows[0].y):Number(year);
+  if(!Number.isInteger(y)||y<1900||y>9998)throw bizErr('E_ARG_INVALID','year 必须是有效四位年份');
+  return y;
+}
+async function requireEntity(tx,userId,entityId,action='read') {
+  await requireOrg(tx,{userId,resource:RESOURCES.read,orgId:entityId,dim:'payroll_legal_entity',action});
+}
+async function sessionFor(tx,userId,sessionId,action='write') {
+  const s=(await tx.query(`SELECT s.*,${sessionDay('s')} AS business_date FROM training_session s WHERE id=$1`,[sessionId])).rows[0];
+  if(!s)throw bizErr('E_TR_NO_SESSION','培训场次不存在或不在授权范围');
+  await requireEntity(tx,userId,Number(s.legal_entity_id),action);
+  return s;
+}
+async function requirePersonAtSession(tx,userId,personId,sessionId) {
+  const ok=(await tx.query(`SELECT EXISTS(SELECT 1 FROM training_session s WHERE s.id=$1
+    AND ${personVisible('$2::bigint',sessionDay('s'),'s.legal_entity_id','$3')}) ok`,[sessionId,personId,userId])).rows[0].ok;
+  if(!ok)throw bizErr('E_OUT_OF_SCOPE','人员在培训日期不属于本场次主体或不在当前授权范围');
+}
+
+/** 主体选择器与培训同用花名册角色，不要求算薪岗位。 */
+export async function entities(tx,{userId}) {
+  await requireSession(tx,{userId,resource:RESOURCES.read,action:'read'});
+  const rows=(await tx.query(`SELECT DISTINCT s.entity_id AS id,
+    COALESCE(l.name,'发薪主体 '||s.entity_id::text) AS name
+    FROM pg_temp.tmp_scope_entity s LEFT JOIN legal_entity l ON l.id=s.entity_id
+    WHERE s.dim_code='payroll_legal_entity' AND ${entityVisible('s.entity_id')}
+    ORDER BY id`)).rows;
+  return {rows};
+}
+
+/** 看板只累计所选主体、所选年度及场次日期可见人员。 */
 export async function board(tx, { userId, entityId, year }) {
-  await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
-  if (!isId(entityId)) throw bizErr('E_ARG_INVALID', 'entity 必须是正整数（发薪法人）');
-
-  const y = Number(year) || Number((await tx.query(
-    `SELECT EXTRACT(year FROM app_today()) y`)).rows[0].y);
-
-  const canWrite = (await tx.query(
-    `SELECT fn_role_can($1,$2,'write') o`, [userId, RESOURCES.write])).rows[0].o;
-
-  const courses = (await tx.query(
-    `SELECT c.id, c.code, c.name, c.category, c.std_hours, c.is_statutory,
-            c.valid_months, c.note, c.is_active,
-            (SELECT count(*)::int FROM training_session s WHERE s.course_id = c.id) AS sessions,
-            (SELECT count(*)::int FROM training_enrollment e
-               JOIN training_session s ON s.id = e.session_id
-              WHERE s.course_id = c.id AND e.status = 'completed') AS completed
-       FROM training_course c
-      ORDER BY c.is_statutory DESC, c.category, c.name`)).rows;
-
-  const sessions = (await tx.query(
-    // ★ 时间在库里按业务时区格式化：直接把 timestamptz 传到 JS 再拼字符串，
-    //   `String(Date)` 给的是 "Fri Mar 05 2026 …"，切片切到的是日期不是时分 ——
-    //   而"14:00 的培训显示 00:00"是会被当成排班错的。
-    `SELECT s.id, s.course_id, c.name AS course_name, c.category, c.std_hours,
-            s.starts_at, s.ends_at, s.hours, s.trainer, s.place, s.capacity, s.status,
-            to_char(s.starts_at AT TIME ZONE app_tz(), 'HH24:MI') AS start_hm,
-            to_char(s.starts_at AT TIME ZONE app_tz(), 'YYYY-MM-DD') AS start_day,
-            (SELECT count(*)::int FROM training_enrollment e
-              WHERE e.session_id = s.id AND e.status <> 'cancelled') AS enrolled,
-            (SELECT count(*)::int FROM training_enrollment e
-              WHERE e.session_id = s.id AND e.status = 'completed') AS completed
-       FROM training_session s JOIN training_course c ON c.id = s.course_id
-      WHERE s.legal_entity_id = $1 AND EXTRACT(year FROM s.starts_at) = $2
-      ORDER BY s.starts_at DESC`, [entityId, y])).rows;
-
-  const gap = (await tx.query('SELECT * FROM fn_training_gap($1,$2)', [entityId, y])).rows;
-
-  const need = Number((await tx.query(
-    `SELECT COALESCE(value_num,0) n FROM fn_policy_effective('TRAINING_MIN_HOURS_YEAR',NULL,$1)`,
-    [`${y}-12-31`])).rows[0].n);
-
-  // 人员年度学时（含已结业的明细），给页面"谁学了多少"用
-  const people = (await tx.query(
-    `SELECT em.person_id, pe.full_name,
-            (SELECT n.no FROM employee_no n
-              WHERE n.assigned_person_id = pe.id AND n.retired_at IS NULL
-              ORDER BY n.assigned_at DESC LIMIT 1) AS employee_no,
-            public.fn_training_hours(em.person_id, $2) AS hours,
-            (SELECT count(*)::int FROM training_enrollment e
-               JOIN training_session s ON s.id = e.session_id
-              WHERE e.employee_id = em.person_id AND e.status = 'completed'
-                AND EXTRACT(year FROM s.starts_at) = $2) AS courses
-       FROM employment em JOIN person pe ON pe.id = em.person_id
-      WHERE em.legal_entity_id = $1
-        AND daterange(em.hire_date, em.leave_date, '[]') @> make_date($2, 12, 31)
-      ORDER BY public.fn_training_hours(em.person_id, $2) DESC, pe.full_name`,
-    [entityId, y])).rows;
-
-  return {
-    year: y, entity: entityId, need_hours: need, canWrite,
-    courses, sessions, gap, people,
-    kpi: {
-      courses: courses.length,
-      statutory: courses.filter((c) => c.is_statutory).length,
-      sessions: sessions.length,
-      planned: sessions.filter((s) => s.status === 'planned').length,
-      enrolled: sessions.reduce((a, s) => a + Number(s.enrolled), 0),
-      completed: sessions.reduce((a, s) => a + Number(s.completed), 0),
-      gapPeople: gap.length,
-      // 达标 = 有学时要求时，缺口为 0 的人 / 总人数
-      okRate: need > 0 && people.length
-        ? Math.round((people.length - gap.length) / people.length * 100) : null,
-    },
-  };
+  await requireSession(tx,{userId,resource:RESOURCES.read,action:'read'});
+  if(!isId(entityId))throw bizErr('E_ARG_INVALID','entity 必须是正整数（发薪法人）');
+  await requireEntity(tx,userId,entityId);
+  const y=await businessYear(tx,year);
+  const canWrite=!!(await tx.query(`SELECT fn_role_can($1,$2,'write') o`,[userId,RESOURCES.write])).rows[0].o;
+  const inYear=`EXTRACT(year FROM s.starts_at AT TIME ZONE app_tz())=$2`;
+  const visibleEnrollment=personVisible('e.employee_id',sessionDay('s'),'s.legal_entity_id','$3');
+  const courses=(await tx.query(`SELECT c.id,c.code,c.name,c.category,c.std_hours,c.is_statutory,
+    c.valid_months,c.note,c.is_active,
+    (SELECT count(*)::int FROM training_session s WHERE s.course_id=c.id AND s.legal_entity_id=$1 AND ${inYear}) AS sessions,
+    (SELECT count(*)::int FROM training_enrollment e JOIN training_session s ON s.id=e.session_id
+      WHERE s.course_id=c.id AND s.legal_entity_id=$1 AND ${inYear} AND e.status='completed' AND ${visibleEnrollment}) AS completed
+    FROM training_course c ORDER BY c.is_statutory DESC,c.category,c.name`,[entityId,y,userId])).rows;
+  const sessions=(await tx.query(`SELECT s.id,s.course_id,c.name AS course_name,c.category,c.std_hours,
+    s.starts_at,s.ends_at,s.hours,s.trainer,s.place,s.capacity,s.status,
+    to_char(s.starts_at AT TIME ZONE app_tz(),'HH24:MI') AS start_hm,
+    to_char(s.starts_at AT TIME ZONE app_tz(),'YYYY-MM-DD') AS start_day,
+    (SELECT count(*)::int FROM training_enrollment e WHERE e.session_id=s.id AND e.status<>'cancelled' AND ${visibleEnrollment}) AS enrolled,
+    (SELECT count(*)::int FROM training_enrollment e WHERE e.session_id=s.id AND e.status='completed' AND ${visibleEnrollment}) AS completed
+    FROM training_session s JOIN training_course c ON c.id=s.course_id
+    WHERE s.legal_entity_id=$1 AND ${inYear} ORDER BY s.starts_at DESC`,[entityId,y,userId])).rows;
+  const need=Number((await tx.query(`SELECT COALESCE(value_num,0) n FROM fn_policy_effective('TRAINING_MIN_HOURS_YEAR',NULL,$1)`,[`${y}-12-31`])).rows[0]?.n||0);
+  const people=(await tx.query(`WITH visible_training AS (
+    SELECT e.* FROM training_enrollment e JOIN training_session s ON s.id=e.session_id
+    WHERE s.legal_entity_id=$1 AND ${inYear} AND e.status='completed' AND ${visibleEnrollment}
+  ) SELECT DISTINCT em.person_id,pe.full_name,
+    (SELECT n.no FROM employee_no n WHERE n.assigned_person_id=pe.id AND n.retired_at IS NULL ORDER BY n.assigned_at DESC LIMIT 1) AS employee_no,
+    COALESCE((SELECT sum(v.attended_hours) FROM visible_training v WHERE v.employee_id=em.person_id),0) AS hours,
+    (SELECT count(*)::int FROM visible_training v WHERE v.employee_id=em.person_id) AS courses
+    FROM employment em JOIN person pe ON pe.id=em.person_id
+    WHERE em.legal_entity_id=$1 AND daterange(em.hire_date,em.leave_date,'[]') @> make_date($2::int,12,31)
+    AND ${personVisible('em.person_id','make_date($2::int,12,31)','em.legal_entity_id','$3')}
+    ORDER BY hours DESC,pe.full_name`,[entityId,y,userId])).rows;
+  const gap=need>0?people.filter(p=>Number(p.hours)<need).map(p=>({employee_id:p.person_id,person_name:p.full_name,employee_no:p.employee_no,
+    got_hours:p.hours,need_hours:need,gap_hours:need-Number(p.hours)})):[];
+  return {year:y,entity:entityId,need_hours:need,canWrite,courses,sessions,gap,people,
+    scope_notice:'仅统计所选主体及培训日期在授权范围的人员；共享课程目录不代表可查看其他主体培训记录。',
+    kpi:{courses:courses.length,statutory:courses.filter(c=>c.is_statutory).length,sessions:sessions.length,
+      planned:sessions.filter(s=>s.status==='planned').length,enrolled:sessions.reduce((a,s)=>a+Number(s.enrolled),0),
+      completed:sessions.reduce((a,s)=>a+Number(s.completed),0),gapPeople:gap.length,
+      okRate:need>0&&people.length?Math.round((people.length-gap.length)/people.length*100):null}};
 }
 
 /** 建课程 */
@@ -126,6 +137,7 @@ export async function createSession(tx, { userId, courseId, entityId, date,
   await requireSession(tx, { userId, resource: RESOURCES.write, action: 'write' });
   if (!isId(courseId)) throw bizErr('E_ARG_INVALID', 'course 必须是正整数');
   if (!isId(entityId)) throw bizErr('E_ARG_INVALID', 'entity 必须是正整数');
+  await requireEntity(tx,userId,entityId,'write');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
     throw bizErr('E_ARG_INVALID', '日期写 YYYY-MM-DD');
   }
@@ -153,9 +165,11 @@ export async function createSession(tx, { userId, courseId, entityId, date,
 export async function enroll(tx, { userId, sessionId, employeeIds }) {
   await requireSession(tx, { userId, resource: RESOURCES.write, action: 'write' });
   if (!isId(sessionId)) throw bizErr('E_ARG_INVALID', 'session 必须是正整数');
-  const list = (Array.isArray(employeeIds) ? employeeIds : [employeeIds])
-    .map(Number).filter(isId);
-  if (!list.length) throw bizErr('E_ARG_INVALID', '至少给一个人（person.id）');
+  const list = (Array.isArray(employeeIds) ? employeeIds : [employeeIds]).map(Number);
+  if (!list.length||list.some(v=>!isId(v))) throw bizErr('E_ARG_INVALID', '请明确有效人员编号（person.id）');
+  await sessionFor(tx,userId,sessionId);
+  // Check the whole request before the first enrollment is written.
+  for(const emp of list)await requirePersonAtSession(tx,userId,emp,sessionId);
 
   const ids = [];
   for (const emp of list) {
@@ -174,6 +188,10 @@ export async function enroll(tx, { userId, sessionId, employeeIds }) {
 export async function attend(tx, { userId, enrollId, hours }) {
   await requireSession(tx, { userId, resource: RESOURCES.write, action: 'write' });
   if (!isId(enrollId)) throw bizErr('E_ARG_INVALID', 'enroll 必须是正整数');
+  const target=(await tx.query('SELECT session_id,employee_id FROM training_enrollment WHERE id=$1',[enrollId])).rows[0];
+  if(!target)throw bizErr('E_TR_NOT_FOUND','报名记录不存在或不在授权范围');
+  await sessionFor(tx,userId,Number(target.session_id));
+  await requirePersonAtSession(tx,userId,Number(target.employee_id),Number(target.session_id));
   const h = hours === null || hours === undefined || hours === '' ? null : Number(hours);
   if (h !== null && !Number.isFinite(h)) throw bizErr('E_ARG_INVALID', '学时必须是数字');
 
@@ -197,24 +215,38 @@ export async function attend(tx, { userId, enrollId, hours }) {
   };
 }
 
-/** 一个人的培训明细（课程 / 学时 / 结业时间） */
-export async function detail(tx, { userId, personId, year }) {
-  await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
-  if (!isId(personId)) throw bizErr('E_ARG_INVALID', 'person 必须是正整数');
-  const y = Number(year) || Number((await tx.query(
-    `SELECT EXTRACT(year FROM app_today()) y`)).rows[0].y);
+/** 逐场次日期判断范围，不能由当前雇佣授权贯通无权历史。 */
+export async function detail(tx,{userId,personId,year}) {
+  if(!isId(personId))throw bizErr('E_ARG_INVALID','person 必须是正整数');
+  const y=await businessYear(tx,year);
+  const canManage=!!(await tx.query("SELECT fn_role_can($1,'training_manage','read') ok",[userId])).rows[0].ok;
+  await requireSession(tx,{userId,resource:canManage?'training_manage':'training_self',action:'read'});
+  if(!canManage&&personId!==await accountPerson(tx,userId))throw bizErr('E_RESOURCE_FORBIDDEN','只能查看本人的学习记录');
+  // A visible employee with no enrollment still has a valid empty detail. Check
+  // relevant employment/assignment boundary dates rather than only today.
+  const allowed=(await tx.query(`WITH boundary AS (
+    SELECT e.legal_entity_id,greatest(e.hire_date,make_date($2::int,1,1)) AS d FROM employment e
+    WHERE e.person_id=$1 AND daterange(e.hire_date,e.leave_date,'[]') && daterange(make_date($2::int,1,1),make_date($2::int,12,31),'[]')
+    UNION SELECT e.legal_entity_id,greatest(e.hire_date,a.valid_from,make_date($2::int,1,1)) FROM employment e
+    JOIN employee_org_assignment a ON a.employee_id=e.person_id AND a.dim_code='cost_org'
+    WHERE e.person_id=$1 AND daterange(e.hire_date,e.leave_date,'[]') && daterange(a.valid_from,a.valid_to,'[]')
+      AND daterange(a.valid_from,a.valid_to,'[]') && daterange(make_date($2::int,1,1),make_date($2::int,12,31),'[]')
+  ) SELECT EXISTS(SELECT 1 FROM boundary b WHERE b.d<=make_date($2::int,12,31)
+    AND ${personVisible('$1::bigint','b.d','b.legal_entity_id','$3')}) ok`,[personId,y,userId])).rows[0].ok;
+  if(!allowed)throw bizErr('E_OUT_OF_SCOPE','人员在指定年度不在培训授权范围');
+  const rows=(await tx.query(`SELECT c.name AS course_name,c.category,c.std_hours,
+    s.starts_at,s.hours AS session_hours,s.trainer,e.id AS enroll_id,e.status,e.attended_hours,e.completed_at
+    FROM training_enrollment e JOIN training_session s ON s.id=e.session_id JOIN training_course c ON c.id=s.course_id
+    WHERE e.employee_id=$1 AND EXTRACT(year FROM s.starts_at AT TIME ZONE app_tz())=$2
+      AND ${personVisible('e.employee_id',sessionDay('s'),'s.legal_entity_id','$3')}
+    ORDER BY s.starts_at DESC`,[personId,y,userId])).rows;
+  return {person:personId,year:y,rows,hours:rows.filter(r=>r.status==='completed').reduce((sum,r)=>sum+Number(r.attended_hours),0)};
+}
 
-  const rows = (await tx.query(
-    `SELECT c.name AS course_name, c.category, c.std_hours,
-            s.starts_at, s.hours AS session_hours, s.trainer,
-            e.id AS enroll_id, e.status, e.attended_hours, e.completed_at
-       FROM training_enrollment e
-       JOIN training_session s ON s.id = e.session_id
-       JOIN training_course c ON c.id = s.course_id
-      WHERE e.employee_id = $1 AND EXTRACT(year FROM s.starts_at) = $2
-      ORDER BY s.starts_at DESC`, [personId, y])).rows;
 
-  return { person: personId, year: y, rows,
-           hours: Number((await tx.query(
-             `SELECT fn_training_hours($1,$2) h`, [personId, y])).rows[0].h) };
+/** Employee self-service never accepts a caller-supplied employee ID. */
+export async function myTraining(tx,{userId,year}) {
+  await requireSession(tx,{userId,resource:'training_self',action:'read'});
+  const personId=await accountPerson(tx,userId);
+  return detail(tx,{userId,personId,year});
 }

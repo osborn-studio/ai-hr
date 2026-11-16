@@ -1,0 +1,2473 @@
+{
+  "schema_version": "1.0.0",
+  "title": "天意HR模块来源与采用契约V1",
+  "status": "总体设计建议／未实现API或数据库schema／非软件验收",
+  "date": "2026-11-17",
+  "product_priority": [
+    "薪酬第一",
+    "排班考勤第二",
+    "绩效第三",
+    "组织人员是共同底座"
+  ],
+  "contract_count": 24,
+  "source_documents": {
+    "V7": "本地资料路径",
+    "V8": "本地资料路径",
+    "V9": "本地资料路径",
+    "V10": "本地资料路径",
+    "V11": "本地资料路径",
+    "V12": "本地资料路径",
+    "V13": "本地资料路径",
+    "V14": "本地资料路径",
+    "V15": "本地资料路径"
+  },
+  "naming_notice": "事件和规范字段为拟定设计名，不代表已存在的接口、表或已完成集成。",
+  "global_invariants": {
+    "source_envelope": [
+      "tenant_id",
+      "source_domain",
+      "canonical_fact_id_or_entitlement_id",
+      "source_revision",
+      "source_status",
+      "subject_context",
+      "effective_interval",
+      "recorded_at",
+      "unit",
+      "currency_if_monetary",
+      "scope",
+      "policy_or_rule_version",
+      "approval_or_attestation_evidence",
+      "dependencies_digest"
+    ],
+    "event_envelope": [
+      "event_id",
+      "event_type",
+      "tenant_id",
+      "business_key",
+      "source_revision",
+      "generation",
+      "occurred_at",
+      "effective_at",
+      "causation_id",
+      "correlation_id",
+      "actor_or_service_context",
+      "payload_digest"
+    ],
+    "time": "所有新有效区间起点含终点不含；记录业务有效时与系统修订时；自然日、工作日、工资/税供款/成本期分别存。",
+    "identity": "永久人员用于授权贯通，实际关系/法定主体/期间决定业务；同人多合法关系不合并成单一人月。",
+    "adoption": "来源可多用但每用途、指标、范围内只有明确生效来源；事实/经济义务身份不因源版本或执行路由变更而改变。",
+    "monetary": "十进制/有理数明确精度，金额单位币种分开；替代目标、确认调整、剩余可付、已付、已申报/已缴不是同一个差额。",
+    "override": "手工/Excel核定是范围化输入版本，标替代或增减、原因/凭据/有效期和来源基线；重算保留/冲回/重审，不能绕过地区法定适用守卫。",
+    "cost": "economic_component_business_id + recognition_basis管唯一认列；package与included_detail不得同计；预算/应计/现金/负债/税费各有口径。",
+    "lifecycle": "草稿/预演/审批/生效/采用/工资确认/银行/申报/缴款/会计/通知分权威；未知占用不释放，真实成功不可虚构回滚。",
+    "atomicity": "本域权威记录+outbox事务提交，跨域逐目标收件箱/幂等/回执及代次控制；不声称远端付款与本地事务天然原子。",
+    "payroll_gate": "缺票、供应商争议、提醒未读、资格失效不自动取消已发生劳动或阻断无争议法定工资；有缺口的扣费/可选项可排除并留待核，必需计算基线缺失按受影响范围办理。"
+  },
+  "permission_policies": {
+    "G-PERM-01": {
+      "rule": "动作、对象范围、字段、业务状态、有效期必须在同一完整授权中同时满足；明确拒绝、集团隔离及账号停用优先。",
+      "surfaces": [
+        "列表",
+        "详情",
+        "全貌",
+        "组织图",
+        "计数",
+        "搜索",
+        "派生解释",
+        "报表",
+        "导出生成",
+        "实际下载",
+        "打印",
+        "附件/短链",
+        "API/MCP/AI",
+        "外部卡片回跳"
+      ],
+      "history": "当前授权决定能否读；发生时关系/组织决定记录归属；不按当前部门重分过去记录。",
+      "roles": "admin仅配置，老板授权读，集团HR总监可贯通本集团；供应商/门店按合同与期间；demo仅隔离虚构帐套全权。",
+      "privacy": "按目的必要字段处理；生物/位置/健康/银行与工资分控；本地部署或共享工号不构成跨境共享授权。"
+    }
+  },
+  "contracts": [
+    {
+      "id": "SRC01",
+      "domain": "人事身份、真实关系与发生时组织",
+      "source_version_refs": [
+        "V9§6–8/12–13/18"
+      ],
+      "authority": {
+        "owner": "人事基础服务",
+        "authoritative_records": [
+          "person",
+          "legal_relationship",
+          "company_segment",
+          "assignment_slice"
+        ],
+        "consumer_projections": [
+          "排班/假期/工资/资格/绩效/服务模块"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "relationship.effected",
+        "relationship.corrected",
+        "identity.merge_approved"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "身份及实际关系核定",
+          "有效区间及主体映射齐全",
+          "生效执行回执而非只审批通过"
+        ],
+        "blocked": [
+          "仅候选/Offer/供应商提报名单",
+          "同名或同手机号未核定",
+          "跨集团身份拼接"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "tenant_id",
+          "person_id",
+          "legal_relationship_id",
+          "company_segment_id"
+        ],
+        "obligation": [
+          "legal_relationship_id",
+          "effective_change_id"
+        ],
+        "adoption_slot": [
+          "target_domain",
+          "legal_relationship_id",
+          "effective_change_id"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "将已生效上下文作为各模块适用快照，不能把同人两关系合并",
+        "reversal": "追溯更正只改变授权有效片段，原已知历史和外部事实保留",
+        "net_delta": "按受影响关系/期间列任务；不复制另一关系工资/余额",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "identity_effect_ledger",
+        "cost_inclusion": {
+          "mode": "reference_only",
+          "basis": "无直接现金/成本；人数按声明粒度去重"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "关系维护",
+          "关系生效",
+          "历史更正"
+        ],
+        "data_scope": [
+          "集团隔离",
+          "实际关系",
+          "发生时组织",
+          "当前完整授权"
+        ],
+        "sensitive_fields": [
+          "证件",
+          "银行",
+          "健康",
+          "薪资"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC02",
+      "domain": "合同条款及工资工时参数激活",
+      "source_version_refs": [
+        "V10§12–17；V8§6"
+      ],
+      "authority": {
+        "owner": "合同条款与业务参数变更服务",
+        "authoritative_records": [
+          "contract_clause_version",
+          "parameter_activation_generation"
+        ],
+        "consumer_projections": [
+          "工资",
+          "排班",
+          "假期"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "contract.signed",
+        "parameter.activation_ready",
+        "parameter.effected",
+        "parameter.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "审批/必要签署证据/有效日/关系/主档核验满足",
+          "必须同时生效参数组已全部就绪"
+        ],
+        "blocked": [
+          "只有OCR文字/已签未激活",
+          "工资与工时混用不同代次",
+          "固定承诺冲突未决"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "contract_id",
+          "clause_business_id",
+          "parameter_slot_id",
+          "legal_relationship_id"
+        ],
+        "obligation": [
+          "parameter_change_package_id",
+          "activation_generation"
+        ],
+        "adoption_slot": [
+          "parameter_slot_id",
+          "effective_interval",
+          "target_domain"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "冻结条款和政策引用，按组发布有效期参数而非写工资金额",
+        "reversal": "收口旧区间与新版本同事务；撤签事实不可虚构回滚",
+        "net_delta": "未锁重算重审，已锁工资走累计净差，原合同保留",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "parameter_effect_ledger",
+        "cost_inclusion": {
+          "mode": "parameter_only",
+          "basis": "参数不是应付，工资按所属期计算一次"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "条款配置",
+          "参数核准",
+          "参数生效"
+        ],
+        "data_scope": [
+          "实际签约关系",
+          "有效区间",
+          "参数组"
+        ],
+        "sensitive_fields": [
+          "合同正文",
+          "薪资标准"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC03",
+      "domain": "统一审批、业务生效与外部证据",
+      "source_version_refs": [
+        "V9§16–18；V10§25–26"
+      ],
+      "authority": {
+        "owner": "流程引擎与各业务执行服务",
+        "authoritative_records": [
+          "workflow_instance",
+          "frozen_form_revision",
+          "effect_execution"
+        ],
+        "consumer_projections": [
+          "业务权威模块",
+          "提醒投影"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "workflow.decided",
+        "business.effect_requested",
+        "business.effect_acknowledged",
+        "workflow.cancelled"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "该实例唯一审批权威",
+          "被冻结内容/节点/人员/代理证据核验",
+          "业务生效仍复验版本/资格/余额"
+        ],
+        "blocked": [
+          "消息已读/待办完成/卡片受理",
+          "外部旧批准或内容不一致",
+          "代理过期/跨企业实例"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "business_request_id",
+          "submission_revision",
+          "workflow_instance_id"
+        ],
+        "obligation": [
+          "business_request_id",
+          "effect_generation"
+        ],
+        "adoption_slot": [
+          "business_request_id",
+          "target_action",
+          "effect_generation"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "批准只提供执行资格，各模块按各自事务返回逐项回执",
+        "reversal": "取消未执行代次；已成功业务转原模块更正，未知先核查",
+        "net_delta": "不因审批回调重送再产生工资/额度/付款",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "workflow_and_effect_receipt_ledger",
+        "cost_inclusion": {
+          "mode": "no_cost",
+          "basis": "审批/消息不生成金额事实"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "提交",
+          "审批",
+          "代理",
+          "生效执行"
+        ],
+        "data_scope": [
+          "实例范围",
+          "节点权限",
+          "当前账号授权",
+          "冻结字段"
+        ],
+        "sensitive_fields": [
+          "实例必要冻结字段",
+          "附件"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC04",
+      "domain": "外部采集、身份映射与原始证据",
+      "source_version_refs": [
+        "V10§22–26；V15§11–12/23–27"
+      ],
+      "authority": {
+        "owner": "连接器收件箱与身份对照服务",
+        "authoritative_records": [
+          "immutable_raw_event",
+          "external_identity_mapping",
+          "sync_checkpoint"
+        ],
+        "consumer_projections": [
+          "核勤",
+          "合同签署证据",
+          "流程证据"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "external.event_received",
+        "mapping.corrected",
+        "sync.window_completed"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "外部企业/来源域/账号类型明确",
+          "发生时有效唯一映射",
+          "窗口分页完整性明确"
+        ],
+        "blocked": [
+          "仅同名或相近时间推定重复",
+          "缺页标全量成功",
+          "不完整/未知来源伪造零值"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "origin_namespace",
+          "external_enterprise_id",
+          "event_namespace",
+          "external_event_id"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "canonical_fact_lineage",
+          "purpose",
+          "metric_scope"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "原始字节/摘要只追加；映射解释和权威来源选择另版本",
+        "reversal": "更正映射列下游影响，不重写原载荷/封勤/已付",
+        "net_delta": "事件版本变化不是第二份事实额度；缺页不提交成功水位",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "raw_inbox_mapping_checkpoint",
+        "cost_inclusion": {
+          "mode": "evidence_only",
+          "basis": "原卡/接口数据不直接产生工资或成本"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "连接管理",
+          "读取授权",
+          "映射核定",
+          "来源采用"
+        ],
+        "data_scope": [
+          "连接企业",
+          "事件来源域",
+          "事件发生时关系",
+          "必要字段"
+        ],
+        "sensitive_fields": [
+          "定位",
+          "原始附件",
+          "外部账号",
+          "生物证据"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC05",
+      "domain": "排班计划与实际工作安排",
+      "source_version_refs": [
+        "V7§4–14；V9§25"
+      ],
+      "authority": {
+        "owner": "排班服务",
+        "authoritative_records": [
+          "published_schedule_revision",
+          "planned_work_segment"
+        ],
+        "consumer_projections": [
+          "核勤",
+          "资格检查",
+          "员工门户"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "schedule.published",
+        "schedule.changed",
+        "support_assignment.effected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "计划已发布且依赖版本有效",
+          "班段/休息/工作地/关系明确",
+          "未来岗位资格复验通过或合法企业例外"
+        ],
+        "blocked": [
+          "草稿/只审批未发布",
+          "资格已失效仍用缓存",
+          "以排班伪造实际打卡"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "schedule_business_id",
+          "planned_segment_id",
+          "legal_relationship_id"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "planned_segment_id",
+          "target_use",
+          "published_revision"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "计划覆盖层与实际事实分开，同雇主支援不改雇主",
+        "reversal": "取消未来安排；历史计划与工作事实不删除",
+        "net_delta": "计划变化仅产生核勤/成本候选，不直接补发或扣款",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "schedule_effect_ledger",
+        "cost_inclusion": {
+          "mode": "planned_budget_only",
+          "basis": "排班估算可作预算，不当实际成本/工资"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "排班编辑",
+          "发布",
+          "调班执行"
+        ],
+        "data_scope": [
+          "管理店/期间",
+          "真实关系",
+          "岗位工作区"
+        ],
+        "sensitive_fields": [
+          "病假原因",
+          "他店薪资"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC06",
+      "domain": "高级假期额度与批准休假",
+      "source_version_refs": [
+        "V7§13/附录B；V9§24；V8§8"
+      ],
+      "authority": {
+        "owner": "假期账户与休假服务",
+        "authoritative_records": [
+          "leave_grant_batch",
+          "leave_reservation",
+          "leave_consumption",
+          "approved_leave_interval"
+        ],
+        "consumer_projections": [
+          "排班覆盖层",
+          "核勤",
+          "工资待遇"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "leave.granted",
+        "leave.reserved",
+        "leave.approved",
+        "leave.cancelled",
+        "leave.transferred"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "批次资格/单位/有效期及余额核定",
+          "批准休假与台账一致",
+          "外部核定基线可按独立权限采用"
+        ],
+        "blocked": [
+          "只改月报不改账户",
+          "原额度两侧同时可用",
+          "缺明细伪造审批和扣减"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "leave_grant_business_id",
+          "leave_account_scope",
+          "leave_request_id"
+        ],
+        "obligation": [
+          "leave_consumption_obligation_id",
+          "leave_transfer_id"
+        ],
+        "adoption_slot": [
+          "leave_request_id",
+          "grant_batch_id",
+          "consumption_or_release"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "预占/使用/过期/转移分别记流水；转移两边成对且不可双可用",
+        "reversal": "驳回/撤销/销假使用原流水补偿，不能恢复已折现/失效额度",
+        "net_delta": "假期给薪由工资规则核算；消费及工资影响不重复扣",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "leave_balance_and_consumption_ledger",
+        "cost_inclusion": {
+          "mode": "quantity_or_payroll_input",
+          "basis": "额度不是现金工资；折现须独立批准应付"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "额度维护",
+          "休假核定",
+          "余额转移"
+        ],
+        "data_scope": [
+          "账户适用关系",
+          "资格有效期",
+          "申请字段"
+        ],
+        "sensitive_fields": [
+          "健康证明",
+          "家庭资格"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      },
+      "design_gap": "V7附录B明确高级假期24项仍需独立详细规格；外部经核定基线可支持工资，不把本契约当专项已实现。"
+    },
+    {
+      "id": "SRC07",
+      "domain": "人事考勤日报月报及外部核定基线",
+      "source_version_refs": [
+        "V7§14/16；V8§8–9；V15§12–15"
+      ],
+      "authority": {
+        "owner": "考勤核定服务",
+        "authoritative_records": [
+          "attendance_daily_revision",
+          "attendance_monthly_revision",
+          "external_attested_baseline"
+        ],
+        "consumer_projections": [
+          "工资输入",
+          "服务计量",
+          "人事全貌"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "attendance.confirmed",
+        "attendance.sealed",
+        "attendance.source_replaced",
+        "attendance.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "指定公司/关系/期间/指标唯一生效来源",
+          "系统版日报加月级调整可勾稽",
+          "外部月基线经核验可用且不造日明细"
+        ],
+        "blocked": [
+          "草稿/缺口当零",
+          "系统月合计与外部月合计叠加",
+          "重汇总静默丢人工调整"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "canonical_work_fact_id",
+          "legal_relationship_id",
+          "work_interval_lineage"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "tenant_id",
+          "legal_relationship_id",
+          "company_id",
+          "period",
+          "metric_id",
+          "purpose"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "按范围替代来源；同事实供工资/服务可独立用，但每用途基础量不重叠",
+        "reversal": "更正保留封存父版；未锁输入重审、已锁走净差",
+        "net_delta": "旧/新值替代不是全量累加；月级调整按保留/冲回/重审处理",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "attendance_source_adoption_ledger",
+        "cost_inclusion": {
+          "mode": "quantity_only",
+          "basis": "工作/计薪/服务量分指标，原时长不直接等于全部工资"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "日报核定",
+          "月报核定",
+          "封存",
+          "导入采用"
+        ],
+        "data_scope": [
+          "具体关系/工作日/指标",
+          "字段可写范围",
+          "授权导出"
+        ],
+        "sensitive_fields": [
+          "工资金额",
+          "健康假因",
+          "定位证据"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC08",
+      "domain": "加班补偿与调休去向",
+      "source_version_refs": [
+        "V7§13.2；V8§8/15"
+      ],
+      "authority": {
+        "owner": "加班核定及补偿分配服务",
+        "authoritative_records": [
+          "overtime_fact",
+          "compensation_allocation"
+        ],
+        "consumer_projections": [
+          "工资加班项目",
+          "调休账户"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "overtime.confirmed",
+        "compensation.allocated",
+        "compensation.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "实际及核定依据完整",
+          "适用地区/制度/补偿方式已核准",
+          "分配总量不超过同一补偿来源"
+        ],
+        "blocked": [
+          "只排班即全额加班",
+          "全量现金和全量调休同时采用",
+          "单位折算缺规则"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "overtime_fact_id",
+          "legal_relationship_id",
+          "work_interval_lineage"
+        ],
+        "obligation": [
+          "overtime_compensation_obligation_id"
+        ],
+        "adoption_slot": [
+          "overtime_compensation_obligation_id",
+          "cash_or_leave_allocation_id"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "补偿选择或明确合法分配后各走工资/假期，不抹掉原加班事实",
+        "reversal": "取消未使用部分；已入薪/已用调休走来源更正与核定",
+        "net_delta": "现金/额度的独立差额分别记，禁止凭一个负数自动追回",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "overtime_compensation_allocation_ledger",
+        "cost_inclusion": {
+          "mode": "payroll_or_leave",
+          "basis": "现金部分进入工资一次；调休额度不再当现金成本重复加"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "加班认定",
+          "补偿选择",
+          "历史更正"
+        ],
+        "data_scope": [
+          "本人关系",
+          "工作区间",
+          "补偿去向"
+        ],
+        "sensitive_fields": [
+          "健康",
+          "工资"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC09",
+      "domain": "绩效成绩、等级与经营结果",
+      "source_version_refs": [
+        "V11§6/9–13/18/23"
+      ],
+      "authority": {
+        "owner": "绩效结果服务",
+        "authoritative_records": [
+          "performance_result_revision",
+          "publication",
+          "appeal"
+        ],
+        "consumer_projections": [
+          "奖金提案",
+          "员工全貌"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "performance.result_approved",
+        "performance.published",
+        "performance.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "计划/对象/关系或责任范围明确",
+          "结果已按流程审核",
+          "申诉状态按方案判断可采用范围"
+        ],
+        "blocked": [
+          "考试原分直接冒充正式绩效",
+          "发布消息当奖金已发",
+          "缺值自动零分"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "performance_plan_id",
+          "subject_context_id",
+          "role_scope_id"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "result_business_id",
+          "target_metric_or_bonus_use",
+          "approved_revision"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "分数/等级只提供已核定来源，奖金由独立方案及提案生成",
+        "reversal": "发布撤回不删已入薪义务；更正生成新成绩并列奖金影响",
+        "net_delta": "评分变更本身不是工资扣款，按正式奖励更正链处理",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "performance_result_ledger",
+        "cost_inclusion": {
+          "mode": "nonmonetary_source",
+          "basis": "结果与人件费指标不是直接会计费用"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "评分",
+          "校准",
+          "结果审核",
+          "成绩发布"
+        ],
+        "data_scope": [
+          "本次任务",
+          "关系/责任范围",
+          "发布阶段"
+        ],
+        "sensitive_fields": [
+          "评分细项",
+          "互评身份",
+          "评语"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC10",
+      "domain": "统一一次性奖励父义务与奖金采用",
+      "source_version_refs": [
+        "V8§8/15/22；V11§16–18；V12§19；V13§14"
+      ],
+      "authority": {
+        "owner": "奖励提案与薪酬采用服务",
+        "authoritative_records": [
+          "canonical_award_obligation",
+          "approved_proposal_revision",
+          "adoption_allocation"
+        ],
+        "consumer_projections": [
+          "正式工资",
+          "成本分配"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "award.proposal_approved",
+        "award.adoption_requested",
+        "award.adopted",
+        "award.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "正式选定算法/资格及提案核准",
+          "真实关系/主体/项目/币种映射有效",
+          "父义务批准额及累计占用核验"
+        ],
+        "blocked": [
+          "影子或对照方案",
+          "同奖励另造培训/绩效父义务",
+          "旧执行代次或未决采用阻断"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "real_reward_source_id",
+          "canonical_award_obligation_id"
+        ],
+        "obligation": [
+          "canonical_award_obligation_id"
+        ],
+        "adoption_slot": [
+          "canonical_award_obligation_id",
+          "allocation_id",
+          "target_payroll_use"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "来源别名需核定指向同父义务；多合法关系独立挣得奖励仍分开",
+        "reversal": "未执行取消代次，已采用走替代/净差，已付不自动追扣",
+        "net_delta": "新总应得减原净采用及已处理补差；对照算法不占正式额度",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "award_entitlement_adoption_ledger",
+        "cost_inclusion": {
+          "mode": "cash_payroll_component",
+          "basis": "入薪后通过工资成本组成展示，不在绩效成本再加一次"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "奖金提案核准",
+          "采用预演",
+          "采用生效",
+          "更正"
+        ],
+        "data_scope": [
+          "父义务",
+          "实际关系",
+          "公司片段",
+          "工资组/币种"
+        ],
+        "sensitive_fields": [
+          "奖金",
+          "银行映射",
+          "资格日"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC11",
+      "domain": "学习结业、考试成绩与绩效指标输入",
+      "source_version_refs": [
+        "V12§5–18/24；V11§9"
+      ],
+      "authority": {
+        "owner": "培训考试服务",
+        "authoritative_records": [
+          "completion_record",
+          "grade_revision",
+          "grade_review",
+          "publication"
+        ],
+        "consumer_projections": [
+          "资格认定",
+          "绩效指标候选",
+          "奖励资格候选"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "learning.completed",
+        "exam.grade_confirmed",
+        "exam.grade_published",
+        "exam.grade_corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "答卷/判分/人工阅卷已按规则最终核定",
+          "观察期/取次/满分量纲及发布策略明确",
+          "来源映射经过目标模块核对"
+        ],
+        "blocked": [
+          "待人工分当正式成绩",
+          "挂课心跳当带薪工时",
+          "补考最高分自动改已发布绩效"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "learning_assignment_id",
+          "exam_task_id",
+          "attempt_business_id"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "target_plan_id",
+          "subject_context_id",
+          "metric_id",
+          "source_selection_rule"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "保留首次/最好/最近等选取依据；不复制答卷成一份人事结果",
+        "reversal": "复核/申诉形成新成绩，不覆盖原答案及已采用绩效",
+        "net_delta": "更正只影响已声明目标候选，目标模块自有审批和净差",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "learning_grade_source_ledger",
+        "cost_inclusion": {
+          "mode": "noncash_noncost_source",
+          "basis": "成绩/证书不是工资应付或已发生培训费用"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "阅卷",
+          "复核",
+          "成绩发布",
+          "指标采用"
+        ],
+        "data_scope": [
+          "任务分派",
+          "阅卷职责",
+          "发布窗口"
+        ],
+        "sensitive_fields": [
+          "正确答案",
+          "答卷",
+          "考试风险",
+          "他人成绩"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC12",
+      "domain": "培训在场与计薪工作时间",
+      "source_version_refs": [
+        "V12§7–8/17；V7§14/16"
+      ],
+      "authority": {
+        "owner": "培训场次核定与考勤服务",
+        "authoritative_records": [
+          "training_attendance",
+          "approved_training_work_interval"
+        ],
+        "consumer_projections": [
+          "考勤核定",
+          "成本归属"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "training.work_candidate",
+        "training.work_confirmed",
+        "training.work_corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "场次/授课或参训身份及实际关系核定",
+          "带薪工时政策及重叠区间核验",
+          "经V7核勤采用而非直接写工资"
+        ],
+        "blocked": [
+          "在线时长/补签直接发加班费",
+          "与已计工作重复时长",
+          "并行关系分配不明"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "training_session_id",
+          "person_id",
+          "canonical_training_work_fact_id"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "canonical_work_fact_lineage",
+          "legal_relationship_id",
+          "attendance_metric"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "工作与培训重叠按规则区间并集/归类，不双算出勤",
+        "reversal": "撤销核定走考勤更正版；学习历史保留",
+        "net_delta": "通过考勤唯一来源链影响工资，不另追加培训工时全额",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "training_to_attendance_adoption_ledger",
+        "cost_inclusion": {
+          "mode": "work_quantity",
+          "basis": "独立技能津贴可并存，但相同时长不新增第二份工资"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "培训签到核定",
+          "带薪培训认定",
+          "考勤采用"
+        ],
+        "data_scope": [
+          "场次/关系",
+          "实际工作区间",
+          "字段范围"
+        ],
+        "sensitive_fields": [
+          "健康",
+          "课堂纪律",
+          "工资"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC13",
+      "domain": "外部证照与统一岗位资格",
+      "source_version_refs": [
+        "V9§23；V12§16–17；V13§8/13–18"
+      ],
+      "authority": {
+        "owner": "证照核验及统一资格服务",
+        "authoritative_records": [
+          "external_certificate_fact",
+          "qualification_revision",
+          "recognition"
+        ],
+        "consumer_projections": [
+          "任职/排班",
+          "津贴资格",
+          "学习差距",
+          "绩效候选"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "certificate.verified",
+        "qualification.effected",
+        "qualification.suspended",
+        "qualification.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "拟任职/值班整个区间覆盖",
+          "持续依赖取来源共同有效区间",
+          "地区/经营范围/认可条件核定"
+        ],
+        "blocked": [
+          "有文件即已核证",
+          "内部考试冒充政府证照",
+          "企业例外豁免已确认适用法定要求"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "certificate_business_id",
+          "qualification_business_id",
+          "recognition_business_id"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "subject_context",
+          "requirement_version",
+          "coverage_interval",
+          "purpose"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "岗位使用读当前权威状态，未来已发布班次亦重验",
+        "reversal": "暂停/撤销传播持续依赖，历史学习/工作/工资事实保留",
+        "net_delta": "证照失效不直接扣工资；待遇由独立参数/奖励采用调整",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "qualification_eligibility_ledger",
+        "cost_inclusion": {
+          "mode": "eligibility_only",
+          "basis": "岗位资格本身无现金和新增成本"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "证照核验",
+          "资格认定",
+          "企业例外",
+          "认可"
+        ],
+        "data_scope": [
+          "主体/岗位/地区",
+          "持续区间",
+          "法定与企业要求类别"
+        ],
+        "sensitive_fields": [
+          "健康证明",
+          "证件号码",
+          "核验证据"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC14",
+      "domain": "持续津贴、岗位待遇及参数互斥",
+      "source_version_refs": [
+        "V10§16–17；V12§19–20；V13§14"
+      ],
+      "authority": {
+        "owner": "待遇参数发布服务",
+        "authoritative_records": [
+          "treatment_parameter_slot",
+          "effective_parameter_version",
+          "coverage_rule"
+        ],
+        "consumer_projections": [
+          "工资规则输入"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "treatment.parameter_proposed",
+        "treatment.parameter_effected",
+        "treatment.parameter_stopped"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "资格/岗位/合同及政策生效条件核定",
+          "计价单位/是否已折算/覆盖区间完整",
+          "多证认可取高/互斥/替代/叠加政策明确"
+        ],
+        "blocked": [
+          "证照/资格回调直接增薪",
+          "同津贴多入口生成重叠区间",
+          "到期直接自动扣回旧工资"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "legal_relationship_id",
+          "payroll_item_code",
+          "treatment_parameter_slot_id"
+        ],
+        "obligation": [
+          "effective_parameter_change_package_id"
+        ],
+        "adoption_slot": [
+          "treatment_parameter_slot_id",
+          "coverage_interval",
+          "target_payroll_group"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "同义待遇共用参数槽，有独立依据才叠加；工资分段计算",
+        "reversal": "停止或更正收口有效区间并核合同手续，不删已发生参数",
+        "net_delta": "只生成受影响期重算/净差；不是每次资格事件再加月津贴",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "treatment_parameter_effect_ledger",
+        "cost_inclusion": {
+          "mode": "payroll_parameter",
+          "basis": "参数自身不产生成本，工资对应项目一次认列"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "待遇制定",
+          "参数审批",
+          "生效",
+          "追溯核定"
+        ],
+        "data_scope": [
+          "实际关系",
+          "项目",
+          "有效期间",
+          "完整授权"
+        ],
+        "sensitive_fields": [
+          "薪资",
+          "资格依据"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC15",
+      "domain": "培训费用、讲师课酬及报销路线",
+      "source_version_refs": [
+        "V12§8/19；V8§8；V15§18–20"
+      ],
+      "authority": {
+        "owner": "费用来源及对应工资/报销/应付权威服务",
+        "authoritative_records": [
+          "approved_expense_fact",
+          "lecture_fee_fact",
+          "route_allocation"
+        ],
+        "consumer_projections": [
+          "工资课酬",
+          "报销",
+          "供应商应付"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "expense.approved",
+        "fee.route_assigned",
+        "expense.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "真实授课/费用及核准标准/凭据",
+          "员工/外部讲师/报销路线明确",
+          "单费用来源未被另一通道全额认领"
+        ],
+        "blocked": [
+          "课程开通即产生员工债务",
+          "同课酬工资及AP双计",
+          "只有预算当实际费用"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "canonical_economic_expense_id",
+          "lecture_session_id_or_expense_line_id"
+        ],
+        "obligation": [
+          "expense_or_fee_obligation_id"
+        ],
+        "adoption_slot": [
+          "expense_or_fee_obligation_id",
+          "route_allocation_id"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "一费用选明确合法路线或批准拆分，基础总额共用余额",
+        "reversal": "路线切换先核旧执行/占用；已付需退款或净更正",
+        "net_delta": "新核准总额减净确认/净结及占用，现金与成本分别对账",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "expense_route_adoption_ledger",
+        "cost_inclusion": {
+          "mode": "expense_native_once",
+          "basis": "工资课酬已含于工资成本者费用侧仅解释，不重复加"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "费用核准",
+          "课酬核定",
+          "路线分配",
+          "财务复核"
+        ],
+        "data_scope": [
+          "合同/场次",
+          "实际义务",
+          "目标支付主体"
+        ],
+        "sensitive_fields": [
+          "个人收款",
+          "讲师费用"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC16",
+      "domain": "宿舍员工最终费用及多渠道扣结",
+      "source_version_refs": [
+        "V14§13/15–18；V15§17"
+      ],
+      "authority": {
+        "owner": "住宿收费及结算服务",
+        "authoritative_records": [
+          "accommodation_charge_obligation",
+          "legal_charge_revision",
+          "settlement_allocation"
+        ],
+        "consumer_projections": [
+          "工资扣结输入",
+          "自付",
+          "供应商承担对账"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "accommodation.charge_confirmed",
+        "accommodation.charge_reduced",
+        "accommodation.settled",
+        "accommodation.refund_confirmed"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "先核费用本身最终可收额",
+          "合法渠道/授权/实际发薪关系及工资保护核验",
+          "父义务跨渠道余额一致"
+        ],
+        "blocked": [
+          "截图当收款",
+          "任意损坏/押金自动扣薪",
+          "费用依法减低差额继续当欠费"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "accommodation_charge_obligation_id",
+          "charge_business_period"
+        ],
+        "obligation": [
+          "accommodation_charge_obligation_id"
+        ],
+        "adoption_slot": [
+          "accommodation_charge_obligation_id",
+          "settlement_channel_allocation"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "采用先占用；工资确认扣结与净工资支付分开；自付也受最终可收额守卫",
+        "reversal": "依法减费下调父义务并核超占用/应退；纯渠道受限不自动免债",
+        "net_delta": "净已结=有效收款/扣结减确认退款；可收/应退与工资实发分别算",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "accommodation_charge_settlement_ledger",
+        "cost_inclusion": {
+          "mode": "employee_charge_or_cost_offset",
+          "basis": "企业租费与个人承担在声明口径对账，不把扣结再作新增成本"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "收费核定",
+          "渠道采用",
+          "工资扣结",
+          "退款"
+        ],
+        "data_scope": [
+          "费用义务",
+          "实际关系",
+          "住宿期间",
+          "合法规则包"
+        ],
+        "sensitive_fields": [
+          "住所",
+          "账单",
+          "工资",
+          "健康"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC17",
+      "domain": "住宿利益及非现金税务输入",
+      "source_version_refs": [
+        "V14§17；V8§2/12–13"
+      ],
+      "authority": {
+        "owner": "住宿事实与薪税分类核定服务",
+        "authoritative_records": [
+          "residence_benefit_segment",
+          "housing_tax_classification"
+        ],
+        "consumer_projections": [
+          "税务基数/IR56准备",
+          "年度参考"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "housing.benefit_confirmed",
+        "housing.tax_classification_confirmed",
+        "housing.benefit_corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "提供公司/住所性质/期间/员工净租金及证据",
+          "现金津贴与受控报销分类明确",
+          "适用税年/规则核定"
+        ],
+        "blocked": [
+          "福利即免税",
+          "宿舍一律统一比例",
+          "租值直接变月扣税或员工现金应付"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "housing_benefit_business_id",
+          "benefit_coverage_segment"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "legal_relationship_id",
+          "tax_year",
+          "benefit_segment",
+          "tax_base_metric"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "非现金标记明确payment_eligible=false；按核定法域仅提供对应税务来源",
+        "reversal": "历史更正保留旧申报，交申报更正链；不直接银行退款",
+        "net_delta": "税务租值与真实租费不是同一金额，现金部分走工资独立来源",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "noncash_tax_base_adoption_ledger",
+        "cost_inclusion": {
+          "mode": "noncash_reference_only",
+          "basis": "不增加现金实发；真实住宿成本由租约/费用权威认列一次"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "利益核定",
+          "薪税分类",
+          "申报采用"
+        ],
+        "data_scope": [
+          "实际提供关系",
+          "提供期间",
+          "税年",
+          "敏感字段"
+        ],
+        "sensitive_fields": [
+          "地址",
+          "关联租金",
+          "薪税收入"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC18",
+      "domain": "简单物品出入库和个人领用",
+      "source_version_refs": [
+        "V9V1.1§23；V14§19"
+      ],
+      "authority": {
+        "owner": "简单物品领用服务",
+        "authoritative_records": [
+          "inventory_movement",
+          "personal_issue_record"
+        ],
+        "consumer_projections": [
+          "员工全貌",
+          "库存数量统计",
+          "离职交接"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "goods.received",
+        "goods.issued",
+        "goods.returned",
+        "goods.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "审批与实际入出库分开",
+          "实际库存数量/受益人/代领人核定",
+          "原单引用及防并发超发"
+        ],
+        "blocked": [
+          "审批通过即扣库存",
+          "丢失未归还即工资罚款",
+          "将辅助金额当库存计价或AP"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "goods_movement_business_id",
+          "original_movement_id"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "movement_business_id",
+          "actual_effect_action"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "只有实际生效记数量，采购/出库不是两份自动工资或费用",
+        "reversal": "已出库更正/退库引用原单，保留实际领取事实",
+        "net_delta": "数量期初+入/退-出+调整；金额不自动扣薪或产生会计成本",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "simple_inventory_movement_ledger",
+        "cost_inclusion": {
+          "mode": "quantity_only_external_cost_reference",
+          "basis": "V9不做成本计价；若外部采购已认成本，领用仅去向解释"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "入库办理",
+          "领用办理",
+          "退库更正"
+        ],
+        "data_scope": [
+          "库存公司/门店",
+          "个人历史",
+          "原单范围"
+        ],
+        "sensitive_fields": [
+          "受益人",
+          "个人用途",
+          "采购辅助金额"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC19",
+      "domain": "供应商服务量、对账与企业应付",
+      "source_version_refs": [
+        "V15§15–18/20–21"
+      ],
+      "authority": {
+        "owner": "服务计量、供应商对账及应付服务",
+        "authoritative_records": [
+          "service_quantity_adoption",
+          "service_settlement_obligation",
+          "ap_target_revision"
+        ],
+        "consumer_projections": [
+          "企业应付",
+          "成本拆分",
+          "供应商门户"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "service.quantity_confirmed",
+        "service.bill_approved",
+        "ap.target_changed",
+        "service.dispute_recorded"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "合同/价目/订单/派驻及已核量版本齐全",
+          "稳定工作事实跨合同基础量不超总量",
+          "账单核准明确无争议范围"
+        ],
+        "blocked": [
+          "供应商单方工时覆盖员工事实",
+          "版本换号新额度",
+          "旧账未付又把新版全额追加AP"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "canonical_work_fact_id",
+          "service_scope_lineage",
+          "contract_line_business_id"
+        ],
+        "obligation": [
+          "service_settlement_obligation_id"
+        ],
+        "adoption_slot": [
+          "canonical_work_fact_id",
+          "service_base_metric",
+          "contract_allocation_id"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "S2累计目标替代S1，仅确认S2-S1应付调整；可付款另减净已结与占用",
+        "reversal": "未执行撤销，已确认净调整，已付下降转应退/贷项",
+        "net_delta": "工资与服务量用途分开；供应商包价中工资供款只解释不再加成本",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "service_quantity_ap_obligation_ledger",
+        "cost_inclusion": {
+          "mode": "package_or_components_exclusive",
+          "basis": "包价与内含组件择一计入总成本，成本归属变化不新生服务费"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "服务确认",
+          "对账审批",
+          "应付确认",
+          "差异核定"
+        ],
+        "data_scope": [
+          "签约公司",
+          "供应商合同",
+          "服务期间",
+          "计费指标"
+        ],
+        "sensitive_fields": [
+          "单价",
+          "供应商人员薪资",
+          "发票",
+          "银行"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC20",
+      "domain": "外部雇主算薪、法定承担及代发资金",
+      "source_version_refs": [
+        "V8§18；V15§19"
+      ],
+      "authority": {
+        "owner": "实际雇主工资服务与委托执行服务",
+        "authoritative_records": [
+          "external_employer_payroll_revision",
+          "funding_allocation",
+          "employee_disbursement_obligation"
+        ],
+        "consumer_projections": [
+          "个人付款",
+          "供应商资金对账",
+          "合规追踪"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "external_payroll.confirmed",
+        "supplier.funding_confirmed",
+        "employee.payout_evidenced"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "实际雇主/法定承担/委托责任分别核定",
+          "个人工资来源与付款主体及授权明确",
+          "拨款用途与逐人结果分配可追溯"
+        ],
+        "blocked": [
+          "客户无依据造自己雇佣工资",
+          "已付供应商等于员工收到",
+          "换执行方生成同一工资第二义务"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "actual_employer_id",
+          "legal_relationship_id",
+          "wage_source_business_id",
+          "earning_component"
+        ],
+        "obligation": [
+          "employee_disbursement_obligation_id",
+          "funding_obligation_id"
+        ],
+        "adoption_slot": [
+          "employee_disbursement_obligation_id",
+          "execution_route_allocation"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "客户/供应商直付是同个人义务不同执行路径，资金拨付不是个人付款终态",
+        "reversal": "切换先核旧执行/授权并撤未执行项，未知保留占用",
+        "net_delta": "工资、拨款、服务费、申报缴费各按各自余额与证据结算",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "external_payroll_and_funding_ledger",
+        "cost_inclusion": {
+          "mode": "funding_not_extra_cost",
+          "basis": "同额拨款不再造工资/成本，服务费独立"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "委托核定",
+          "外部工资核对",
+          "拨款",
+          "个人代发"
+        ],
+        "data_scope": [
+          "供应商合同",
+          "实际雇主关系",
+          "授权期间",
+          "必要字段"
+        ],
+        "sensitive_fields": [
+          "工资摘要",
+          "个人账户",
+          "委托文件"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC21",
+      "domain": "工资计算、人工核定与正式确认",
+      "source_version_refs": [
+        "V8§2/5/7–9/15–16/22"
+      ],
+      "authority": {
+        "owner": "薪酬计算及工资确认服务",
+        "authoritative_records": [
+          "frozen_payroll_input",
+          "calculation_revision",
+          "confirmed_payroll_obligation"
+        ],
+        "consumer_projections": [
+          "付款计划",
+          "申报供款准备",
+          "成本",
+          "本人薪单"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "payroll.calculated",
+        "payroll.confirmed",
+        "payroll.corrected",
+        "payroll.payslip_published"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "来源/参数/规则/主体/币种/期间基线齐全",
+          "override冲突已保留/冲回/重审",
+          "只阻断受影响必需依赖且合法扣费可单独排除"
+        ],
+        "blocked": [
+          "影子/申报批次生成工资应付",
+          "非现金/企业承担加员工实发",
+          "供应商缺票/通知未读卡无争议法定工资"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "payroll_earning_business_id",
+          "legal_relationship_id",
+          "earning_period",
+          "component_id"
+        ],
+        "obligation": [
+          "payroll_earning_obligation_id",
+          "employee_disbursement_obligation_id"
+        ],
+        "adoption_slot": [
+          "canonical_source_or_entitlement_id",
+          "target_payroll_item",
+          "earning_scope"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "采用/计算/批准/确认分别存；同确定输入生成同结果，确认记录累计目标",
+        "reversal": "未锁重算重审，已锁新版本或净补差，已付/已报事实不伪回滚",
+        "net_delta": "经济应付调整=新目标-旧确认；可付=新净应付-净已付-有效占用",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "payroll_earning_and_confirmation_ledger",
+        "cost_inclusion": {
+          "mode": "gross_cash_plus_employer_components",
+          "basis": "工资毛薪作为成本组成，个人代扣已包含；净薪不是全口径成本"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "输入采用",
+          "计算",
+          "核定",
+          "确认",
+          "薪单发布"
+        ],
+        "data_scope": [
+          "实际关系/法定主体",
+          "工资组/期间",
+          "项目字段",
+          "完整授权"
+        ],
+        "sensitive_fields": [
+          "全部薪税/银行/健康相关来源"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC22",
+      "domain": "统一付款、扣结、预付、退款与执行占用",
+      "source_version_refs": [
+        "V8§16；V14§16；V15§19–21"
+      ],
+      "authority": {
+        "owner": "支付计划/回执及相应结算账本",
+        "authoritative_records": [
+          "payment_intent",
+          "receipt",
+          "settlement_posting",
+          "prepayment_allocation"
+        ],
+        "consumer_projections": [
+          "个人/供应商/费用结算",
+          "资金报表",
+          "会计候选"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "payment.reserved",
+        "payment.submitted",
+        "payment.receipted",
+        "payment.refunded",
+        "settlement.reversed"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "有效应付/可收义务及合法付款依据",
+          "唯一意图、账户版本、币种、已付及占用核验",
+          "预付可用额与应付可结额双边核验"
+        ],
+        "blocked": [
+          "导出/受理/供应商确认当到账",
+          "未知释放后换路重复付款",
+          "负数银行付款",
+          "已扣结因净薪银行失败再制造宿舍欠费"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "canonical_obligation_id",
+          "payment_intent_id",
+          "channel_receipt_namespace",
+          "receipt_id"
+        ],
+        "obligation": [
+          "employee_disbursement_obligation_id_or_ap_or_charge_id"
+        ],
+        "adoption_slot": [
+          "canonical_obligation_id",
+          "execution_generation",
+          "route_allocation_id"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "同义务所有执行渠道共享余额；确认扣结与银行支付分状态",
+        "reversal": "只有未执行可取消；真实回执冲回/退款需独立证据，未知对账",
+        "net_delta": "净已结=有效付款/核销/扣结-确认退款/冲回；负余额转应退",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "payment_and_settlement_ledger",
+        "cost_inclusion": {
+          "mode": "cash_movement_not_recognition",
+          "basis": "付款/预付/核销不自动新增应计成本，资金和费用分口径"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "付款审批",
+          "银行执行",
+          "收款核验",
+          "退款",
+          "预付核销"
+        ],
+        "data_scope": [
+          "付款责任主体",
+          "收款方",
+          "义务",
+          "账户版本"
+        ],
+        "sensitive_fields": [
+          "银行账户",
+          "金额",
+          "付款凭据"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC23",
+      "domain": "税务申报、社保MPF及实际缴款",
+      "source_version_refs": [
+        "V8§10–15/22；V14§17；V15§2/4–5"
+      ],
+      "authority": {
+        "owner": "薪税供款模块与官方回执接入",
+        "authoritative_records": [
+          "declaration_revision",
+          "contribution_obligation",
+          "filing_receipt",
+          "remittance_receipt"
+        ],
+        "consumer_projections": [
+          "对账",
+          "本人税供款记录",
+          "财务往来"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "declaration.prepared",
+        "declaration.accepted",
+        "contribution.remitted",
+        "declaration.corrected"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "法域/身份/计划/账户/有效期核定",
+          "已有工资或非现金事实及规则版本明确",
+          "申报受理与缴款/入账回执分开"
+        ],
+        "blocked": [
+          "香港年度估税直接月扣",
+          "餐饮临时MPF统一等60日",
+          "供应商收款当基金收到",
+          "申报批次重复生工资"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "reporting_employer_id",
+          "person_tax_or_fund_scope",
+          "statutory_period",
+          "liability_component"
+        ],
+        "obligation": [
+          "statutory_payment_obligation_id"
+        ],
+        "adoption_slot": [
+          "statutory_obligation_id",
+          "declaration_revision",
+          "action_kind"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "准备/审批/提交/受理/缴款/入个人账户按可得证据分别记",
+        "reversal": "旧已受理申报不可删除，以法域允许更正方式处理",
+        "net_delta": "差额考虑已报/已缴各自累计，不把工资更正等同已更正报税",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "statutory_filing_and_remittance_ledger",
+        "cost_inclusion": {
+          "mode": "employer_portion_once_employee_withheld_in_gross",
+          "basis": "雇主份额成本独立；员工份额为毛薪包含项；缴款不二次认成本"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "薪税核定",
+          "申报提交",
+          "供款核验",
+          "缴款对账"
+        ],
+        "data_scope": [
+          "法定主体",
+          "关系/个人累计域",
+          "制度/期间",
+          "必要字段"
+        ],
+        "sensitive_fields": [
+          "税号",
+          "社保/MPF账户",
+          "薪税及健康资格"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    },
+    {
+      "id": "SRC24",
+      "domain": "人力总成本、会计与人员组织全貌",
+      "source_version_refs": [
+        "V8§19–22；V9§10–11/19–20/23；V15§17/20–21"
+      ],
+      "authority": {
+        "owner": "成本汇聚服务；会计以财务系统回执为准；全貌仅投影",
+        "authoritative_records": [
+          "cost_component",
+          "inclusion_mapping",
+          "allocation_revision",
+          "accounting_receipt",
+          "authorized_projection"
+        ],
+        "consumer_projections": [
+          "老板成本",
+          "预算/实际/现金/负债对账",
+          "员工/组织全貌"
+        ],
+        "projections_are_not_authority": true
+      },
+      "events": [
+        "cost.component_confirmed",
+        "cost.allocation_corrected",
+        "accounting.receipted",
+        "projection.refreshed"
+      ],
+      "confirmed_source_eligibility": {
+        "required": [
+          "每组件有经济来源/币种/期间/口径",
+          "包价/内含解释/独立组件互斥关系声明",
+          "授权派生字段/计数及下载时再次核验"
+        ],
+        "blocked": [
+          "净薪当总成本",
+          "包价再加内含工资供款",
+          "住房RV/资金拨付/库存出库直接加成本",
+          "缓存/通知当正式事实"
+        ],
+        "revalidate_at_execution": true,
+        "missing_is_not_zero": true
+      },
+      "stable_business_keys": {
+        "fact": [
+          "economic_component_business_id",
+          "cost_basis",
+          "original_currency"
+        ],
+        "obligation": [],
+        "adoption_slot": [
+          "economic_component_business_id",
+          "recognition_basis",
+          "allocation_scope"
+        ],
+        "excluded_from_economic_identity": [
+          "source_revision",
+          "algorithm_revision",
+          "import_file_hash",
+          "execution_route",
+          "display_name"
+        ],
+        "alias_resolution": "跨域别名须有核定关系；未经核定不凭同人同月或名称强合并"
+      },
+      "apply_reversal_netdelta": {
+        "apply": "按明确应计/现金/负债/预算口径汇聚；集团折算保留原币及汇率版本",
+        "reversal": "更正来源按累计净差与分摊版本，已入会计走冲正/更正回执",
+        "net_delta": "分摊子项+残余=来源；源组件只累计一次，内含项目仅解释",
+        "unknown_result": "保留对应占用，查询权威结果后处理",
+        "partial_result": "逐行/组记录实际结果，不假报整批原子成功"
+      },
+      "output_ledger": {
+        "name": "cost_inclusion_allocation_and_projection_ledger",
+        "cost_inclusion": {
+          "mode": "explicit_package_or_atomic_component_policy",
+          "basis": "保留工资、雇主、服务费、租费、培训等原生来源；可抵扣税等按财务政策分类，不混口径"
+        },
+        "cash_side_effect_in_formula": false
+      },
+      "permissions": {
+        "policy_ref": "G-PERM-01",
+        "actions": [
+          "成本查看",
+          "分摊核准",
+          "会计导出",
+          "字段导出",
+          "异步下载"
+        ],
+        "data_scope": [
+          "当前完整授权",
+          "发生时归属",
+          "字段敏感级别",
+          "报表口径/时间"
+        ],
+        "sensitive_fields": [
+          "可逆薪资派生值",
+          "人数小组",
+          "合同/银行/健康"
+        ],
+        "full_context_required": true,
+        "receiver_does_not_inherit_producer_authority": true
+      }
+    }
+  ]
+}

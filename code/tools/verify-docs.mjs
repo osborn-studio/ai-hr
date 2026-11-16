@@ -109,7 +109,7 @@ actual.totalSkipped = contractSkip;
 // ---------------------------------------------------------------------------
 // 3. README 里写的数字
 // ---------------------------------------------------------------------------
-const readme = readFileSync(join(ROOT, '..', 'README.md'), 'utf8');
+const readme = readFileSync(join(ROOT, '..', 'docs', 'runtime', 'verification-baseline.md'), 'utf8');
 const claimed = {
   // **52 个迁移 · 76 张表 · 145 个业务函数（…）· 25 个触发器**
   migrations: Number((readme.match(/\*\*(\d+) 个迁移/) || [])[1]),

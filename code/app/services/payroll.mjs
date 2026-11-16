@@ -18,6 +18,7 @@
 // ============================================================================
 import { requireOrg, requireSession } from './guard.mjs';
 import { bizErr } from '../errors.mjs';
+import { assertLegacyPayrollRegion } from './payroll-jurisdiction.mjs';
 // ★ 发薪期末的日期表达式只有一处（见该文件头）：打印页、工资条列表、发放清单
 //   必须用同一个日期判"这批人算不算在我范围内"，否则补打上月单时会漏人/多人，
 //   而三条路各自都"看起来对"。
@@ -40,9 +41,10 @@ export async function runPayroll(tx, { userId, period, entityId }) {
   // 发薪的维度是 payroll_legal_entity，不是 cost_org ——
   // 选错维度会变成"在 A 店范围内的人都能算 B 法人的薪"，而两边都查得到数据。
   await requireOrg(tx, { userId, resource: RESOURCES.run, orgId: entityId, dim: 'payroll_legal_entity', action: 'write' });
+  await assertLegacyPayrollRegion(tx,entityId,period);
 
   let run = (await tx.query(
-    'SELECT id, status FROM pay_run WHERE period=$1 AND legal_entity_id=$2 ORDER BY id LIMIT 1',
+    "SELECT id, status FROM pay_run WHERE period=$1 AND legal_entity_id=$2 AND kind='monthly' ORDER BY id LIMIT 1",
     [period, entityId])).rows[0];
 
   if (!run) {
@@ -101,6 +103,7 @@ export async function runBonus(tx, { userId, year, entityId }) {
   if (!Number.isInteger(y) || y < 2000 || y > 2100) throw bizErr('E_ARG_INVALID', 'year 不合理');
   await requireOrg(tx, { userId, resource: RESOURCES.run, orgId: entityId,
     dim: 'payroll_legal_entity', action: 'write' });
+  await assertLegacyPayrollRegion(tx,entityId,`${y}-12`);
 
   const period = `${y}-12`;
   let run = (await tx.query(
@@ -127,7 +130,7 @@ export async function listRuns(tx) {
   //   列表上不写法人就分不清"这个 2026-08 是哪家公司的" ——
   //   而且两行的期间完全一样，看起来像重复数据。
   return (await tx.query(
-    `SELECT pr.id, pr.period, pr.status, pr.calc_version, pr.sealed_at,
+    `SELECT pr.id, pr.period, pr.status, pr.calc_version, pr.sealed_at, pr.kind,
             pr.legal_entity_id,
             COALESCE(le.name, '法人 #' || pr.legal_entity_id) AS entity_name,
             count(p.id)::int slips,
@@ -135,7 +138,7 @@ export async function listRuns(tx) {
        FROM pay_run pr
        LEFT JOIN payslip p ON p.pay_run_id = pr.id
        LEFT JOIN legal_entity le ON le.id = pr.legal_entity_id
-      GROUP BY pr.id, pr.period, pr.status, pr.calc_version, pr.sealed_at,
+      GROUP BY pr.id, pr.period, pr.status, pr.calc_version, pr.sealed_at, pr.kind,
                pr.legal_entity_id, le.name
       ORDER BY pr.period DESC, pr.id DESC`)).rows;
 }

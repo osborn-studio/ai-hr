@@ -127,7 +127,7 @@ const TABS = ['home', 'org', 'employees', 'dashboard', 'attendance', 'payslip', 
 {
   const html = await dumpDom(`http://127.0.0.1:${PORT}/?as=2&pwd=demo1234#dashboard`);
   // 区域总量表里出现 A店，但不出现华东区（那是整棵子树的汇总）
-  const tablePart = viewOf(html).split('区域总量')[1] || '';
+  const tablePart = (stripScript(html).match(/<h2>区域总量<\/h2>([\s\S]*?)<\/table>/) || [])[1] || '';
   rec('UI4', '门店 HR 的看板：区域总量只有 A店 一行，没有「华东区」那一行',
       /A店/.test(tablePart) && !/华东区/.test(tablePart),
       `有A店=${/A店/.test(tablePart)} 有华东区=${/华东区/.test(tablePart)}`);

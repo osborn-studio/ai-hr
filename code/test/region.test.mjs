@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import { createApp } from '../app/server.mjs';
+process.env.SEED_SKIP='1';
+const {db,server}=await createApp();let checks=0;
+const check=(name,value)=>{assert.ok(value,name);checks++;console.log('PASS '+name);};
+const q=async(sql,args=[]) => (await db.query(sql,args)).rows;
+const add=async(table,data)=>{const keys=Object.keys(data);return(await q(`INSERT INTO ${table}(${keys.join(',')}) VALUES(${keys.map((_,i)=>'$'+(i+1)).join(',')}) RETURNING *`,Object.values(data)))[0];};
+const reject=async(name,fn)=>{await assert.rejects(fn,e=>['23514','23503','P0001'].includes(e.code));checks++;console.log('PASS '+name);};
+try{
+  const g=await add('ty_group',{code:'LOCALE-TEST',name:'虚构地区配置集团'});
+  const hk=await add('ty_brand',{group_id:g.id,code:'HK',name:'虚构香港品牌',region_code:'HK',currency_code:'HKD'});
+  const cn=await add('ty_brand',{group_id:g.id,code:'CN',name:'虚构内地品牌',region_code:'CN',currency_code:'CNY'});
+  const lh=await add('ty_ledger',{group_id:g.id,brand_id:hk.id,code:'HK',name:'香港虚构帐套',scope_mode:'brand'});
+  const lc=await add('ty_ledger',{group_id:g.id,brand_id:cn.id,code:'CN',name:'内地虚构帐套',scope_mode:'brand'});
+  check('品牌帐套继承明确香港地区和港元',lh.region_code==='HK'&&lh.currency_code==='HKD');
+  check('内地帐套使用人民币且没有名称推断',lc.region_code==='CN'&&lc.currency_code==='CNY');
+  await reject('帐套不能声明不同于品牌的地区',()=>add('ty_ledger',{group_id:g.id,brand_id:hk.id,code:'BAD',name:'错误帐套',scope_mode:'brand',region_code:'CN',currency_code:'CNY'}));
+  await reject('地区和币种必须成对提供',()=>add('ty_brand',{group_id:g.id,code:'HALF',name:'半个配置',region_code:'HK'}));
+  const ch=await add('ty_company',{group_id:g.id,brand_id:hk.id,ledger_id:lh.id,code:'HK01',name:'香港虚构一店'});
+  const cc=await add('ty_company',{group_id:g.id,brand_id:cn.id,ledger_id:lc.id,code:'CN01',name:'内地虚构一店'});
+  const a=(await q('SELECT * FROM fn_ty_company_locale($1)',[ch.id]))[0];
+  check('公司读取地域币种来自关系配置',a.region_code==='HK'&&a.currency_code==='HKD');
+  const groupLedger=await add('ty_ledger',{group_id:g.id,code:'HQ',name:'集团总部帐套',scope_mode:'group',region_code:'CN',currency_code:'CNY'});
+  const hq=await add('ty_company',{group_id:g.id,ledger_id:groupLedger.id,code:'HQ',name:'虚构总部',company_kind:'headquarters'});
+  check('无品牌总部使用集团帐套的地区币种',(await q('SELECT * FROM fn_ty_company_locale($1)',[hq.id]))[0].currency_code==='CNY');
+  await reject('单地区集团帐套不能挂不同币种的品牌公司',()=>add('ty_company',{group_id:g.id,ledger_id:groupLedger.id,brand_id:hk.id,code:'BAD-HK',name:'不一致公司'}));
+  const p=(await q("SELECT fn_ty_create_person($1,NULL,'跨地区虚构人员') id",[g.id]))[0];
+  await add('ty_employment',{group_id:g.id,person_id:p.id,company_id:cc.id,hire_date:'2025-01-01',leave_date:'2025-06-30',status:'ended'});
+  await add('ty_employment',{group_id:g.id,person_id:p.id,company_id:ch.id,hire_date:'2025-07-01'});
+  check('跨地区保留同集团一个永久身份',(await q('SELECT count(*)::int n FROM ty_employment WHERE person_id=$1',[p.id]))[0].n===2);
+  const unknown=await add('ty_brand',{group_id:g.id,code:'UNKNOWN',name:'名字含香港但未配置'});
+  check('名字不自动产生香港规则',unknown.region_code===null&&unknown.currency_code===null);
+  console.log(`地区币种 · ${checks} 条通过 · 驱动 ${db.driver}`);
+}finally{server.close();await db.close();}

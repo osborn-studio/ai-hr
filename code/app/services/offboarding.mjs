@@ -17,7 +17,7 @@
 import { requireSession } from './guard.mjs';
 import { bizErr } from '../errors.mjs';
 
-export const RESOURCES = { read: 'employee_roster', write: 'employee_roster' };
+export const RESOURCES = { read: 'employment_manage', write: 'employment_manage' };
 
 const isId = (v) => Number.isInteger(v) && v > 0;
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));

@@ -42,3 +42,17 @@ backups/
 # ★ 本地私有档案：真实客户与个人信息，**永不提交**
 #   （公开仓库只放虚构演示数据，见 local-private/真实客户与个人信息.md）
 local-private/
+.runtime/
+*.dump
+workspace-access.json
+验收截图/
+
+# Local demonstration login credentials
+test-accounts.json
+
+# Generated frontend and test output
+coverage/
+.vite/
+.cache/
+playwright-report/
+test-results/
