@@ -40,11 +40,20 @@
     "test:region": "node test/region.test.mjs",
     "init:test": "node tools/init-test-workspace.mjs --confirm-synthetic",
     "test:legacy": "node test/run.mjs && node test/api.test.mjs && node test/persist.test.mjs && node test/backup.test.mjs && node test/db-contract.test.mjs && node test/ui.test.mjs && node test/lifecycle.mjs && node test/multi-org.mjs && node test/perm-matrix.mjs && node test/pack.mjs && node test/station-scope.mjs && node test/extra1.mjs && node test/extra2.mjs",
-    "test:new": "node test/foundation.test.mjs && node test/foundation-api.test.mjs && node test/payroll-selection.test.mjs && node test/bridge.test.mjs && node test/foundation-import.test.mjs && node test/customer-payroll.test.mjs && node test/customer-performance.test.mjs && node test/customer-api.test.mjs && node test/customer-workbench-contract.test.mjs && node test/test-workspace.test.mjs && node test/organization-view.test.mjs && node test/region.test.mjs && node test/legacy-region.test.mjs && node test/hk-tools.test.mjs && node test/training-scope.test.mjs",
+    "test:new": "node test/foundation.test.mjs && node test/foundation-api.test.mjs && node test/payroll-selection.test.mjs && node test/bridge.test.mjs && node test/foundation-import.test.mjs && node test/customer-payroll.test.mjs && node test/customer-performance.test.mjs && node test/customer-api.test.mjs && node test/customer-workbench-contract.test.mjs && node test/test-workspace.test.mjs && node test/organization-view.test.mjs && node test/region.test.mjs && node test/legacy-region.test.mjs && node test/hk-tools.test.mjs && node test/training-scope.test.mjs && node test/test-accounts.test.mjs && node test/employee-self.test.mjs && node test/persona-permissions.test.mjs && node test/login-name.test.mjs",
     "test:legacy-region": "node test/legacy-region.test.mjs",
     "test:hk": "node test/hk-tools.test.mjs",
     "test:organization-view": "node test/organization-view.test.mjs",
-    "test:training-scope": "node test/training-scope.test.mjs"
+    "test:training-scope": "node test/training-scope.test.mjs",
+    "test:accounts": "node test/test-accounts.test.mjs",
+    "test:employee-self": "node test/employee-self.test.mjs",
+    "test:personas": "node test/persona-permissions.test.mjs",
+    "init:test-accounts": "node tools/init-test-accounts.mjs --confirm-synthetic --work-areas",
+    "test:test-accounts": "node test/test-accounts.test.mjs",
+    "test:persona": "node test/persona-permissions.test.mjs",
+    "test:login": "node test/login-name.test.mjs",
+    "init:accounts": "node tools/init-test-accounts.mjs --confirm-synthetic --work-areas",
+    "test:login-name": "node test/login-name.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16"

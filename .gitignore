@@ -46,3 +46,6 @@ local-private/
 *.dump
 workspace-access.json
 验收截图/
+
+# Local demonstration login credentials
+test-accounts.json

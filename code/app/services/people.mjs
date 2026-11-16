@@ -15,8 +15,9 @@
 import { requireSession } from './guard.mjs';
 import { bizErr } from '../errors.mjs';
 import { inStationScope } from './scope.mjs';
+import { personaFor } from './persona-guard.mjs';
 
-export const RESOURCES = { roster: 'employee_roster' };
+export const RESOURCES = { roster: 'employee_roster', write: 'employment_manage' };
 
 /** 花名册。as_of 必传：不给"当前在职"这种说法，否则同一个查询跨月会变成另一个答案。 */
 export async function roster(tx, { userId, asOf }) {
@@ -72,10 +73,13 @@ export async function roster(tx, { userId, asOf }) {
   // ★ 空串 → null（190）：库里允许空串（历史导入），而空串与 null 在页面上长得
   //   不一样（"" 会渲染成空白格、null 会渲染成"—"）。"没录"必须只有一种表示。
   const nn = (v) => (v === '' || v === undefined ? null : v);
+  const persona=await personaFor(tx,userId);
+  const salaryAll=!persona||!!(await tx.query("SELECT fn_role_can($1,'payroll_slips_read_all','read') ok",[userId])).rows[0].ok;
   return rows.map((r) => ({
     ...r,
     english_name: nn(r.english_name),
     job_title: nn(r.job_title),
+    hourly_rate:salaryAll||String(persona?.legacy_person_id)===String(r.employee_id)?r.hourly_rate:null,
     contract_days_left: r.contract_end
       ? Math.round((new Date(r.contract_end).getTime() - today) / 86400000) : null,
     _actions: { national_id: actId, mobile: actMobile },
@@ -91,7 +95,7 @@ export async function roster(tx, { userId, asOf }) {
  *   比一个人真的有两个档案更常见，只有"已核实"才需要唯一。
  */
 export async function saveProfile(tx, { userId, employeeId, nationalId, mobile, verified }) {
-  await requireSession(tx, { userId, resource: RESOURCES.roster, action: 'write' });
+  await requireSession(tx, { userId, resource: RESOURCES.write, action: 'write' });
   if (!Number.isInteger(employeeId) || employeeId <= 0) {
     throw bizErr('E_ARG_INVALID', 'employee 必须是正整数（person.id）');
   }
@@ -175,18 +179,20 @@ export async function detail(tx, { userId, employeeId, asOf }) {
        FROM v_leave_balance b JOIN leave_type t ON t.id = b.leave_type_id
       WHERE b.employee_id = $1 ORDER BY b.leave_type_id`, [employeeId])).rows;
 
-  const payslips = (await tx.query(
+  const persona=await personaFor(tx,userId);
+  const salaryAllowed=!persona||String(persona.legacy_person_id)===String(employeeId)||!!(await tx.query("SELECT fn_role_can($1,'payroll_slips_read_all','read') ok",[userId])).rows[0].ok;
+  const payslips = salaryAllowed?(await tx.query(
     `SELECT p.id, r.period, p.gross_amount,
             fn_apply_mask(p.net_amount::text, $2) AS net_amount,
             p.si_employee, p.tax_amount
        FROM payslip p JOIN pay_run r ON r.id = p.pay_run_id
-      WHERE p.employee_id = $1 ORDER BY r.period DESC LIMIT 5`, [employeeId, actNet])).rows;
+      WHERE p.employee_id = $1 ORDER BY r.period DESC LIMIT 5`, [employeeId, actNet])).rows:[];
 
   return {
     as_of: asOf,
     employee: mine,
     profile, employments, assignments, balances, payslips,
-    _actions: { national_id: actProfile, net_amount: actNet },
+    _actions: { national_id: actProfile, net_amount: actNet, salary_history:salaryAllowed },
   };
 }
 
@@ -196,6 +202,7 @@ export async function detail(tx, { userId, employeeId, asOf }) {
  *   另写一个"能不能给这个人办离职"的判断，就会与名单漂移。
  */
 export async function terminate(tx, { userId, employeeId, leaveDate, reason }) {
+  await requireSession(tx,{userId,resource:RESOURCES.write,action:'write'});
   if (!Number.isInteger(employeeId) || employeeId <= 0) throw bizErr('E_ARG_INVALID', 'id 必须是正整数');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(leaveDate || ''))) {
     throw bizErr('E_ARG_INVALID', 'date 必须是 YYYY-MM-DD');

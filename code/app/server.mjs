@@ -104,6 +104,8 @@ import * as testWorkspace from './services/test-workspace.mjs';
 import * as hkTools from './services/hk-tools.mjs';
 import * as customerPayroll from './services/customer-payroll.mjs';
 import * as customerPerformance from './services/customer-performance.mjs';
+import { authorizePersonaRequest } from './services/persona-guard.mjs';
+import * as employeeSelf from './services/employee-self.mjs';
 import { prepareRead, requireOrg, requireSession } from './services/guard.mjs';
 import { createLedgerRegistry } from './registry.mjs';
 
@@ -817,7 +819,7 @@ export async function createApp() {
       }
 
       // New workspace entry; legacy root remains stable for existing integrations/tests.
-      if (req.method === 'GET' && ['/workspace','/workspace.html','/workspace.mjs','/workspace.css','/customer-workbench.mjs','/foundation-import-ui.mjs','/organization-view.mjs','/hk-tools-ui.mjs'].includes(url.pathname)) {
+      if (req.method === 'GET' && ['/workspace','/workspace.html','/workspace.mjs','/workspace.css','/workspace-permissions.mjs','/employee-self-ui.mjs','/customer-workbench.mjs','/foundation-import-ui.mjs','/organization-view.mjs','/hk-tools-ui.mjs'].includes(url.pathname)) {
         const file = url.pathname === '/workspace' ? 'workspace.html' : url.pathname.slice(1);
         if (file.endsWith('.html')) {
           const nonce = randomBytes(16).toString('base64');
@@ -892,9 +894,21 @@ export async function createApp() {
       }
 
       if (req.method === 'POST' && url.pathname === '/login') {
-        const uid = Number(url.searchParams.get('user'));
-        const pwd = url.searchParams.get('pwd');
-        if (!Number.isInteger(uid) || uid <= 0) return json(res, 400, { error: 'E_ARG_INVALID' });
+        const namedLogin = String(req.headers['content-type'] || '').toLowerCase().startsWith('application/json');
+        let loginInput = null;
+        if (namedLogin) {
+          try { loginInput = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8')); }
+          catch { return json(res, 400, { error: 'E_ARG_INVALID', message: '登录内容不是有效JSON' }); }
+          if (!loginInput || Array.isArray(loginInput) || typeof loginInput !== 'object'
+              || typeof loginInput.login !== 'string' || !loginInput.login.trim() || loginInput.login.length > 128
+              || typeof loginInput.password !== 'string' || loginInput.password.length > 1024) {
+            return json(res, 400, { error: 'E_ARG_INVALID', message: '请填写账号和口令' });
+          }
+        }
+        let uid = namedLogin ? 0 : Number(url.searchParams.get('user'));
+        const pwd = namedLogin ? loginInput.password : url.searchParams.get('pwd');
+        const loginName = namedLogin ? loginInput.login.trim() : String(uid);
+        if (!namedLogin && (!Number.isSafeInteger(uid) || uid <= 0)) return json(res, 400, { error: 'E_ARG_INVALID' });
 
         // ★ 多帐套：登录先选帐套（用友那套）。没传就用默认帐套 ——
         //   单帐套客户永远不会看到这个参数，而多帐套客户不选就等于"进错公司"。
@@ -902,7 +916,7 @@ export async function createApp() {
         let ledgerCode = null;
         if (registry) {
           try {
-            ledgerCode = url.searchParams.get('ledger') || await registry.defaultCode();
+            ledgerCode = (namedLogin && typeof loginInput.ledger === 'string' ? loginInput.ledger : null) || url.searchParams.get('ledger') || await registry.defaultCode();
             if (!ledgerCode) {
               return json(res, 409, { error: 'E_LEDGER_NONE', message: '实例里还没有任何帐套' });
             }
@@ -936,12 +950,25 @@ export async function createApp() {
           console.error('[login-throttle]', String(e.message).split('\n')[0]);
         }
 
+        // Resolve names only after source throttling. Numeric query login stays
+        // compatible; JSON first accepts the exact configured name, then an ID.
+        if (namedLogin) {
+          const account = (await loginDb.query(`SELECT id FROM sys_account
+            WHERE status='active' AND (login=$1 OR (id::text=$1 AND $1 ~ '^[0-9]+$'))
+            ORDER BY CASE WHEN login=$1 THEN 0 ELSE 1 END LIMIT 1`, [loginName])).rows[0];
+          uid = account ? Number(account.id) : 0;
+        }
+
         // ★ 认证与会话在同一个事务里：锁的是同一行口令记录。
         //   分成两个事务，两次并发登录就会各读一次旧计数（爆破的经典缺口）。
         let res0;
         try {
           // ① 入账事务：认证结论与失败计数必须**先提交**（否则回滚会把计数抹掉）
-          res0 = await withTx(loginDb, (tx) => authn.authenticate(tx, { userId: uid, password: pwd }));
+          res0 = await withTx(loginDb, async tx => {
+            const account=(await tx.query('SELECT status FROM sys_account WHERE id=$1',[uid])).rows[0];
+            if(account&&account.status!=='active')throw bizErr('E_AUTH_BAD_CREDENTIAL','账号或口令不正确');
+            return authn.authenticate(tx,{userId:uid,password:pwd});
+          });
         } catch (e) {
           const m = toHttp(e);
           // ★ 异常路径也要记一条"来源上的失败"：账号被锁时 authenticate 会直接抛，
@@ -952,7 +979,8 @@ export async function createApp() {
               [source, String(uid), false]));
           } catch { /* 记账失败不改变对调用方的答复 */ }
           await logReq(uid, 'auth.login', `user:${uid}`, false, m.body.error, null);
-          return json(res, m.status, m.body);
+          return json(res, m.status, namedLogin && m.body.error === 'E_AUTH_BAD_CREDENTIAL'
+            ? { error: 'E_AUTH_BAD_CREDENTIAL', message: '账号或口令不正确' } : m.body);
         }
 
         // ② 结论出来之后再抛：这样"错了一次"已经落库，而错误码仍然准确
@@ -960,7 +988,7 @@ export async function createApp() {
           const code = res0.status === 'locked' ? 'E_AUTH_LOCKED' : 'E_AUTH_BAD_CREDENTIAL';
           const msg = res0.status === 'locked'
             ? `口令错误次数过多，账号锁定至 ${res0.lockedUntil}`
-            : `账号或口令不正确（还可以再试 ${Math.max(0, 5 - res0.failedCount)} 次）`;
+            : namedLogin ? '账号或口令不正确' : `账号或口令不正确（还可以再试 ${Math.max(0, 5 - res0.failedCount)} 次）`;
           await withTx(loginDb, (tx) => tx.query('SELECT fn_login_record($1,$2,$3)',
             [source, String(uid), false]));
           await logReq(uid, 'auth.login', `user:${uid}`, false, code, null);
@@ -1004,18 +1032,29 @@ export async function createApp() {
 
       // ★ 该改口令的用户，除"改口令"外一律拦住。
       //   用 200 + 提示语的做法会被前端忽略，而忽略的代价是旧口令继续存在。
-      if (sess.mustChange && url.pathname !== '/api/me/password') {
+      if (sess.mustChange && !['/api/me/password','/api/me/logout'].includes(url.pathname)) {
         return json(res, 428, {
           error: 'E_PWD_CHANGE_REQUIRED',
           message: '该账号必须先修改口令（POST /api/me/password）',
         });
       }
 
+      // Persona restrictions are resolved from the authenticated database account.
+      await withTx(db,tx=>authorizePersonaRequest(tx,{userId:uid,pathname:url.pathname,method:req.method}));
+
       if(url.pathname.startsWith('/api/hk-tools/')&&req.method==='POST'){
         let input;try{input=JSON.parse((await readBody(req,1024*1024)).toString('utf8'));}
         catch(e){if(e.code)throw e;throw bizErr('E_TY_ARGUMENT','请求内容不是有效JSON');}
         const kind=url.pathname.slice('/api/hk-tools/'.length);
         return await runWrite(res,{actor:uid,action:'hk_tools.calculate',subject:`company:${input.company_id}`,fn:tx=>hkTools.calculate(tx,{userId:uid,kind,input})});
+      }
+
+      if(req.method==='GET'&&['/api/customer-payroll/my','/api/training/my','/api/exam/my-board'].includes(url.pathname)){
+        const allowed=url.pathname==='/api/training/my'?new Set(['year']):new Set();
+        if([...url.searchParams.keys()].some(key=>!allowed.has(key)))throw bizErr('E_TY_ARGUMENT','自助查询按当前登录身份显示，请勿传入人员或范围参数');
+        if(url.pathname==='/api/customer-payroll/my')return await runRead(res,tx=>employeeSelf.payroll(tx,{userId:uid}));
+        if(url.pathname==='/api/training/my')return await runRead(res,tx=>training.myTraining(tx,{userId:uid,year:url.searchParams.get('year')}));
+        return await runRead(res,tx=>exam.myBoard(tx,{userId:uid}));
       }
 
       if (url.pathname.startsWith('/api/customer-payroll/') || url.pathname.startsWith('/api/customer-performance/')) {
@@ -2614,6 +2653,25 @@ export async function createApp() {
         return await runWrite(res, {
           actor: uid, action: 'session.revoke', subject: `session:${id}`,
           fn: (tx) => session.revokeMine(tx, { userId: uid, sessionId: id, reason }),
+        });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/me/logout') {
+        return await runWrite(res, {actor:uid,action:'session.logout',subject:'current session',
+          fn:tx=>session.revoke(tx,{token:auth,by:String(uid),reason:'用户主动退出当前工作台'})});
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/me/capabilities') {
+        return await runRead(res, async tx => {
+          const rows=(await tx.query(`SELECT resource_code,
+            fn_role_can($1,resource_code,'read') AS can_read,
+            fn_role_can($1,resource_code,'write') AS can_write
+            FROM sys_perm_resource ORDER BY resource_code`,[uid])).rows;
+          const hasProfiles=(await tx.query("SELECT to_regclass('public.ty_test_account_profile') IS NOT NULL ok")).rows[0].ok;
+          const profile=hasProfiles?(await tx.query('SELECT profile_code,person_id FROM ty_test_account_profile WHERE account_id=$1',[uid])).rows[0]:null;
+          const person=(await tx.query('SELECT person_id FROM sys_account WHERE id=$1',[uid])).rows[0]?.person_id;
+          return {resources:Object.fromEntries(rows.map(r=>[r.resource_code,{can_read:r.can_read,can_write:r.can_write}])),
+            profile_code:profile?.profile_code||null,has_person:!!person};
         });
       }
 

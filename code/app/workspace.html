@@ -20,11 +20,11 @@
     <form class="login-card" id="loginForm">
       <h2>登录工作台</h2>
       <p class="muted">使用已分配的账号，进入你的管理范围。</p>
-      <label>账号编号<input id="loginUser" name="user" inputmode="numeric" autocomplete="username" required placeholder="输入账号编号"></label>
+      <label>登录账号<input id="loginUser" name="user" autocomplete="username" required placeholder="输入账号，如 demo 或 ty000001"></label>
       <label>密码<input id="loginPassword" name="password" type="password" autocomplete="current-password" required placeholder="输入密码"></label>
       <div class="form-error" id="loginError" role="alert" hidden></div>
       <button class="primary login-submit" type="submit">登录</button>
-      <details class="demo-details"><summary>本机开发演示</summary><p>开发演示账号为 1000，密码见本地交付说明。请勿使用客户真实账号进行演示。</p><button type="button" class="text-button" id="fillDemo">填入开发账号</button></details>
+      <details class="demo-details"><summary>演示账号</summary><p>demo 可体验全部功能，admin 用于系统配置；老板和各岗位使用独立账号。账号与初始密码见本地账号文档。</p><button type="button" class="text-button" id="fillDemo">填入 demo 账号</button></details>
     </form>
   </section>
 

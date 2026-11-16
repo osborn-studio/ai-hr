@@ -10,7 +10,8 @@ const safeRead = (key, fallback = '') => { try { return sessionStorage.getItem(k
 const safeWrite = (key, value) => { try { value ? sessionStorage.setItem(key, value) : sessionStorage.removeItem(key); } catch { /* storage is optional */ } };
 let context = {group_id:'', ledger_id:'', company_id:''};
 try { context = {...context, ...JSON.parse(safeRead(CONTEXT_STORAGE, '{}'))}; } catch { /* start with no scope */ }
-const state = {token:safeRead(STORAGE), me:null, data:{}, context, page:1, query:'', route:'home', loadId:0, editor:null};
+import { canOpenRoute } from './workspace-permissions.mjs';
+const state = {token:safeRead(STORAGE), me:null, permissions:{}, data:{}, context, page:1, query:'', route:'home', loadId:0, editor:null};
 const pageSize = 15;
 
 const statusLabels = {active:'启用',inactive:'停用',ended:'已结束',cancelled:'已取消',draft:'草稿',pending:'待核'};
@@ -66,7 +67,7 @@ const navGroups = [
   ['薪酬管理',[['customer-payroll','薪酬核算','▤'],['hk-tools','香港用工与日薪','◷'],['legacy-payroll','算薪工作台','▤'],['legacy-payslip','工资条','▧'],['legacy-salaryitem','工资项目','＋'],['legacy-adjust','工资调整','↗'],['legacy-paypolicy','薪酬政策','≡'],['legacy-siledger','社保台账','▣'],['legacy-declare','申报表','▥'],['legacy-settlement','外包结算','□']]],
   ['招聘与发展',[['legacy-recruit','招聘','○'],['customer-performance','绩效考核','◇'],['legacy-perf','绩效','◇'],['legacy-training','培训与考试','▱']]],
   ['经营分析',[['legacy-dashboard','数据看板','▥'],['legacy-report','报表','▤']]],
-  ['个人工作',[['legacy-home','原业务工作台','▦'],['legacy-approval','待办审批','✓'],['legacy-roles','我的权限','◈']]],
+  ['个人工作',[['my-payroll','我的工资','▧'],['my-leave','我的假期','◴'],['my-training','我的培训与考试','▱'],['legacy-home','原业务工作台','▦'],['legacy-approval','待办审批','✓'],['legacy-roles','我的权限','◈']]],
   ['平台管理',[['groups','集团','⊞'],['brands','品牌','◇'],['ledgers','业务帐套','▣'],['grants','基础资料授权','⌘'],['foundation-bridge','业务接续','⇄'],['foundation-import','花名册导入','⇧'],['legacy-ledger','原业务帐套与账号','▣'],['legacy-policy','业务制度','≡'],['legacy-exceptions','业务例外','!'],['legacy-health','运行自检','◉'],['legacy-mcp','AI开放接口','⌁']]],
 ];
 
@@ -117,7 +118,7 @@ function renderNavigation(){
   const currentSection=navGroups.find(([heading,items])=>heading!=='概览'&&items.some(([key])=>key===state.route));
   if(currentSection)state.navOpen=new Set([currentSection[0]]);
   $('#navigation').innerHTML=navGroups.map(([heading,items])=>{
-    const visible=items.filter(([key])=>key!=='grants'||state.data.capabilities?.can_manage_access);
+    const visible=items.filter(([key])=>canOpenRoute(key,state.permissions)&&(key!=='grants'||state.data.capabilities?.can_manage_access));
     if(!visible.length)return '';
     const content=visible.map(([key,label,icon])=>`<button class="nav-item ${key===state.route?'active':''}" data-route="${key}" ${key===state.route?'aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${icon}</span>${esc(label)}</button>`).join('');
     if(heading==='概览')return `<section class="nav-section">${content}</section>`;
@@ -139,18 +140,22 @@ async function renderPage(){
   const id=++state.loadId,route=state.route,container=$('#content');document.querySelectorAll('dialog.customer-dialog').forEach(d=>d.close());container.onclick=null;
   const oldFrame=container.querySelector('iframe');if(oldFrame)oldFrame.src='about:blank';
   container.className='';container.scrollTop=0;
+  if(!canOpenRoute(route,state.permissions)){
+    $('#breadcrumb').innerHTML='<b>当前岗位权限</b>';container.innerHTML='<section class="card"><h2>当前账号未开放此功能</h2><p class="muted">请从左侧菜单进入已授权的业务。</p><a href="#home">返回工作台</a></section>';return;
+  }
   const isLegacy=route.startsWith('legacy-');
   $('.contextbar').classList.toggle('legacy-context',isLegacy);
   ['#groupContext','#ledgerContext','#companyContext'].forEach(k=>$(k).disabled=isLegacy);
   $('#contextHelp').textContent=isLegacy?'兼容业务使用原授权范围':'基础资料按当前范围显示';
   if(route==='home'){$('#breadcrumb').innerHTML='<b>工作台</b>';renderHome();return;}
+  if(['my-payroll','my-training','my-leave'].includes(route)){$('#breadcrumb').innerHTML=`<b>${route==='my-payroll'?'我的工资':route==='my-leave'?'我的假期':'我的培训与考试'}</b>`;return renderEmployeeSelf({kind:route==='my-payroll'?'pay':route==='my-leave'?'leave':'training',container,request,me:state.me,token:state.token,toast,capabilities:state.permissions,isCurrent:()=>id===state.loadId});}
   if(route==='hk-tools'){$('#breadcrumb').innerHTML='<b>香港用工与日薪</b>';return renderHKTools({container,bootstrap:state.data,context:state.context,token:state.token,request,toast,isCurrent:()=>id===state.loadId});}
   if(route==='organization'){$('#breadcrumb').innerHTML='<b>组织全景</b>';return renderOrganization({container,bootstrap:state.data,context:state.context,asOf:today(),token:state.token,isCurrent:()=>id===state.loadId});}
-  if(route==='foundation-import'){$('#breadcrumb').innerHTML='<b>花名册导入</b>';return renderFoundationImport({container,request,bootstrap:state.data,context:state.context,token:state.token,toast,isCurrent:()=>id===state.loadId});}
+  if(route==='foundation-import'){$('#breadcrumb').innerHTML='<b>花名册导入</b>';return renderFoundationImport({container,request,bootstrap:state.data,context:state.context,token:state.token,toast,capabilities:state.permissions,isCurrent:()=>id===state.loadId});}
   if(['customer-payroll','customer-performance','foundation-bridge'].includes(route)){
     const kind=route==='foundation-bridge'?'bridge':route==='customer-payroll'?'payroll':'performance';
     $('#breadcrumb').innerHTML=`<b>${esc(kind==='bridge'?'业务接续':kind==='payroll'?'薪酬核算':'绩效考核')}</b>`;
-    return renderCustomer({kind,container,request,bootstrap:state.data,context:state.context,token:state.token,toast,isCurrent:()=>id===state.loadId});
+    return renderCustomer({kind,container,request,bootstrap:state.data,context:state.context,token:state.token,toast,capabilities:state.permissions,isCurrent:()=>id===state.loadId});
   }
   if(isLegacy){const key=route.slice(7),meta=legacy[key];if(!meta){navigate('home');return;}$('#breadcrumb').innerHTML=`${esc(meta[1])}<span class="slash">/</span><b>${esc(meta[0])}</b>`;renderLegacy(key,meta);return;}
   const config=configs[route];if(!config){navigate('home');return;}
@@ -172,14 +177,20 @@ function renderHome(){
        <a href="#people"><span class="step-number">3</span><span><b>建人员档案，记录每次雇佣</b><small>同一个人调店、复聘，身份编号保持连续</small></span><span class="arrow">›</span></a>
        <a href="#assignments"><span class="step-number">4</span><span><b>明确部门、岗位与任职期间</b><small>保留历史，避免覆盖原来的任职经历</small></span><span class="arrow">›</span></a>
      </div></section><section class="card"><h2>当前工作范围</h2><dl class="scope-list"><div><dt>集团</dt><dd>${current('groups',c.group_id,'全部已授权集团')}</dd></div><div><dt>帐套</dt><dd>${current('ledgers',c.ledger_id,'全部已授权帐套')}</dd></div><div><dt>公司</dt><dd>${current('companies',c.company_id,'全部已授权公司')}</dd></div><div><dt>基础维护</dt><dd>${canWrite()?'允许维护':'只读'}</dd></div></dl><div class="quick-links"><a href="#organization">组织全景</a><a href="#people">查人员经历</a><a href="#positions">设公司岗位</a><a href="#legacy-approval">待办审批</a></div></section></div>
-     ${!activeCollection('groups').length&&d.capabilities?.can_manage_access?'<section class="card"><h2>开始本机演示</h2><p class="muted">创建一组虚构集团、双帐套与门店组织，用于检验基础配置。不会导入客户或员工原始资料。</p><button id="seedDemo">初始化虚构演示基础</button><div id="seedError" class="form-error" hidden></div></section>':''}`;
+     ${!activeCollection('groups').length&&d.capabilities?.can_manage_access&&state.permissions.profile_code!=='config_admin'?'<section class="card"><h2>开始本机演示</h2><p class="muted">创建一组虚构集团、双帐套与门店组织，用于检验基础配置。不会导入客户或员工原始资料。</p><button id="seedDemo">初始化虚构演示基础</button><div id="seedError" class="form-error" hidden></div></section>':''}`;
   $('#reloadHome').onclick=()=>runRefresh();
-  if(d.capabilities?.can_manage_access){
+  if(state.permissions.profile_code&&!['config_admin','demo'].includes(state.permissions.profile_code)){
+    const workflow=$('#content .workflow');
+    if(workflow){workflow.previousElementSibling.textContent='岗位工作入口';workflow.innerHTML=navGroups.flatMap(([,items])=>items).filter(([route])=>route!=='home'&&canOpenRoute(route,state.permissions)).slice(0,8).map(([route,label,icon])=>`<a href="#${esc(route)}"><span class="step-number">${esc(icon)}</span><span><b>${esc(label)}</b><small>按当前账号与数据范围进入</small></span><span class="arrow">›</span></a>`).join('');}
+  }
+  $('#content').querySelectorAll('[data-home-route]').forEach(button=>{if(!canOpenRoute(button.dataset.homeRoute,state.permissions))button.disabled=true;});
+  if(d.capabilities?.can_manage_access&&state.permissions.resources?.payroll_run?.can_write&&state.permissions.resources?.perf_cycle?.can_write&&state.permissions.resources?.payroll_slips_read_all?.can_read){
     const card=document.createElement('section');card.className='card';card.innerHTML='<h2>天意集团 · 双品牌20门店</h2><p class="muted">建立香香鱼米、大富烤肉各10家门店，以及人员任职、薪酬与绩效案例。所有名称、编号和金额均为独立生成的假数据；已建立时进入原测试帐套。</p><div class="toolbar"><label>初始绩效算法 <select id="testAggregation"><option value="floor_average_months">逐月奖金取均后向下取整</option><option value="average_score_last_grade">平均达成度与末月职级基数</option></select></label><button class="primary" id="seedCompleteTest">建立完整测试帐套</button></div><p class="form-error" id="completeTestError" hidden></p>';$('#content').append(card);
     card.querySelector('#seedCompleteTest').onclick=async e=>{e.target.disabled=true;try{const r=await request('/api/foundation/test-seed',{method:'POST',body:{confirm_synthetic:true,selected_aggregation:card.querySelector('#testAggregation').value}});state.context={group_id:String(r.group_id),ledger_id:'',company_id:''};rememberContext();await refresh();navigate('home');toast('已进入完整虚构测试帐套');}catch(error){card.querySelector('#completeTestError').textContent=error.message;card.querySelector('#completeTestError').hidden=false;e.target.disabled=false;}};
   }
   document.querySelectorAll('[data-home-route]').forEach(b=>b.onclick=()=>navigate(b.dataset.homeRoute));
   const seed=$('#seedDemo');if(seed)seed.onclick=async()=>{seed.disabled=true;try{await request('/api/foundation/demo-seed',{method:'POST',body:{}});await refresh();toast('虚构演示基础已创建');}catch(e){$('#seedError').textContent=e.message;$('#seedError').hidden=false;seed.disabled=false;}};
+  $('#content').querySelectorAll('a[href^="#"]').forEach(a=>{if(!canOpenRoute(a.getAttribute('href').slice(1),state.permissions))a.hidden=true;});
 }
 
 function getRows(config){
@@ -339,16 +350,16 @@ window.addEventListener('message',event=>{
 });
 async function runRefresh(){try{await refresh();}catch(e){toast(e.message,true);}}
 async function enter(){
-  state.me=await request('/api/me');$('#accountName').textContent=state.me.name||state.me.login||'已登录账号';$('#avatar').textContent=(state.me.name||'人').slice(0,1);
+  const [me,permissions]=await Promise.all([request('/api/me'),request('/api/me/capabilities')]);state.me=me;state.permissions=permissions;$('#accountName').textContent=state.me.name||state.me.login||'已登录账号';$('#avatar').textContent=(state.me.name||'人').slice(0,1);
   try{await refresh();}catch(error){if(!Object.values(state.context).some(Boolean)||!/E_TY_FORBIDDEN|E_TY_NOT_FOUND/.test(error.message))throw error;state.context={group_id:'',ledger_id:'',company_id:''};rememberContext();await refresh();}$('#loginScreen').hidden=true;$('#workspace').hidden=false;
 }
 $('#loginForm').onsubmit=async e=>{
   e.preventDefault();const submit=$('#loginForm button[type="submit"]');submit.disabled=true;$('#loginError').hidden=true;
-  try{const qs=new URLSearchParams({user:$('#loginUser').value.trim(),pwd:$('#loginPassword').value});const r=await request('/login?'+qs,{method:'POST',authenticate:false});state.token=r.token;safeWrite(STORAGE,state.token);state.context={group_id:'',ledger_id:'',company_id:''};rememberContext();await enter();$('#loginPassword').value='';}
+  try{const r=await request('/login',{method:'POST',authenticate:false,body:{login:$('#loginUser').value.trim(),password:$('#loginPassword').value}});state.token=r.token;safeWrite(STORAGE,state.token);state.context={group_id:'',ledger_id:'',company_id:''};rememberContext();state.route='home';history.replaceState(null,'',location.pathname+location.search+'#home');await enter();$('#loginPassword').value='';}
   catch(error){showLogin(error.message);}finally{submit.disabled=false;}
 };
-$('#fillDemo').onclick=()=>{$('#loginUser').value='1000';$('#loginPassword').value='';$('#loginPassword').focus();};
-$('#logout').onclick=()=>{state.loadId++;state.data={};state.token='';safeWrite(STORAGE,'');$('#content').innerHTML='';showLogin();};
+$('#fillDemo').onclick=()=>{$('#loginUser').value='demo';$('#loginPassword').value='';$('#loginPassword').focus();};
+$('#logout').onclick=async()=>{try{await request('/api/me/logout',{method:'POST',body:{}});}catch{/* local state still clears if the server is unavailable */}finally{state.loadId++;state.data={};state.permissions={};state.token='';safeWrite(STORAGE,'');$('#content').innerHTML='';showLogin();}};
 $('#menuToggle').onclick=()=>$('#workspace').classList.toggle('nav-open');
 $('#closeEditor').onclick=$('#cancelEditor').onclick=()=>$('#editor').close();
 $('#closeDetail').onclick=()=>$('#detail').close();
@@ -360,7 +371,7 @@ $('#editorForm').onsubmit=saveEditor;
     state.page=1;state.query='';rememberContext();await runRefresh();
   };
 });
-function readRoute(){const key=(location.hash.slice(1).split('/')[0]||'home');return key==='home'||configs[key]||['customer-payroll','customer-performance','foundation-bridge','foundation-import','organization','hk-tools'].includes(key)||(key.startsWith('legacy-')&&legacy[key.slice(7)])?key:'home';}
+function readRoute(){const key=(location.hash.slice(1).split('/')[0]||'home');return key==='home'||configs[key]||['my-payroll','my-training','my-leave','customer-payroll','customer-performance','foundation-bridge','foundation-import','organization','hk-tools'].includes(key)||(key.startsWith('legacy-')&&legacy[key.slice(7)])?key:'home';}
 window.addEventListener('hashchange',()=>{state.route=readRoute();state.page=1;state.query='';$('#workspace').classList.remove('nav-open');if(state.token){renderNavigation();renderPage();}});
 state.route=readRoute();
 if(state.token)enter().catch(error=>showLogin(error.message));else showLogin();
@@ -371,3 +382,4 @@ import { renderFoundationImport } from './foundation-import-ui.mjs';
 import { renderOrganization } from './organization-view.mjs';
 
 import { renderHKTools } from './hk-tools-ui.mjs';
+import { renderEmployeeSelf } from './employee-self-ui.mjs';

@@ -16,10 +16,11 @@
 //   它不是"成绩单"，是"错题回顾"：交卷前不调它（库里也会拒），
 //   交卷后才调 —— 这两件事在同一个函数上，靠的是 attempt.submitted_at 一个判据。
 // ============================================================================
-import { requireSession } from './guard.mjs';
+import { requireSession,requireOrg } from './guard.mjs';
 import { bizErr } from '../errors.mjs';
+import { personaFor,trainingPersonAccess,trainingAttemptAccess,trainingPaperAccess } from './persona-guard.mjs';
 
-export const RESOURCES = { read: 'employee_roster', write: 'employee_roster' };
+export const RESOURCES = { read: 'training_manage', write: 'training_manage' };
 
 // 与库里的 ck_ecl_kind 同一份清单。库里是最后一道，这里是为了给调用方一个
 // 说得清的参数错（E_ARG_INVALID）而不是一个 23514。
@@ -68,6 +69,11 @@ export async function openTask(tx, { userId, paperId, name, orgId, openAt, close
   await requireSession(tx, { userId, resource: RESOURCES.write, action: 'write' });
   if (!isId(Number(paperId))) throw bizErr('E_ARG_INVALID', 'paper 必须是正整数（试卷 id）');
   const org = orgArg(orgId);
+  const persona=await personaFor(tx,userId);
+  if(persona&&persona.profile_code!=='demo') {
+    if(!org)throw bizErr('E_ARG_INVALID','请选择获授权的门店组织建立考试任务');
+    await requireOrg(tx,{userId,resource:RESOURCES.write,orgId:org,action:'write'});
+  }
   const nm = String(name || '').trim();
   if (!nm || nm.length > 96) throw bizErr('E_ARG_INVALID', '任务名称必填且不超过 96 字');
 
@@ -90,7 +96,7 @@ export async function openTask(tx, { userId, paperId, name, orgId, openAt, close
  *   而不是把一次不及格显示成"未考"。
  */
 export async function tasksFor(tx, { userId, personId, on }) {
-  await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
+  await trainingPersonAccess(tx,{userId,personId:Number(personId),action:'read',on:on||null});
   if (!isId(Number(personId))) throw bizErr('E_ARG_INVALID', 'person 必须是正整数');
   if (on !== null && on !== undefined && on !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(String(on))) {
     throw bizErr('E_ARG_INVALID', '日期写 YYYY-MM-DD');
@@ -123,7 +129,7 @@ export async function tasksFor(tx, { userId, personId, on }) {
  *   所以即使调用方忘了调这个，fn_exam_start 也发不出卷。
  */
 export async function checkWindow(tx, { userId, paperId, at }) {
-  await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
+  await trainingPaperAccess(tx,{userId});
   if (!isId(Number(paperId))) throw bizErr('E_ARG_INVALID', 'paper 必须是正整数');
   const t = ts(at, '检查时刻');
   await tx.query(`SELECT fn_exam_task_check($1,$2::timestamptz)`, [Number(paperId), t]);
@@ -136,7 +142,7 @@ export async function checkWindow(tx, { userId, paperId, at }) {
  *   交卷前不能被调通 —— 否则等于把卷子送出去。
  */
 export async function review(tx, { userId, attemptId }) {
-  await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
+  await trainingAttemptAccess(tx,{userId,attemptId:Number(attemptId),action:'read'});
   if (!isId(Number(attemptId))) throw bizErr('E_ARG_INVALID', 'attempt 必须是正整数');
 
   const rows = (await tx.query(`SELECT * FROM fn_exam_review($1)`,
@@ -190,8 +196,8 @@ export async function stat(tx, { userId, paperId, orgId }) {
   if (!isId(Number(paperId))) throw bizErr('E_ARG_INVALID', 'paper 必须是正整数');
   const org = orgArg(orgId);
 
-  const rows = (await tx.query(`SELECT * FROM fn_exam_stat($1,$2)`,
-    [Number(paperId), org])).rows;
+  const rows = (await tx.query(`SELECT * FROM fn_ty_exam_stat_scope($1,$2,$3)`,
+    [userId,Number(paperId), org])).rows;
 
   const buckets = rows.map((r) => ({
     bucket: r.bucket,
@@ -214,8 +220,8 @@ export async function missing(tx, { userId, paperId, orgId }) {
   if (!isId(Number(paperId))) throw bizErr('E_ARG_INVALID', 'paper 必须是正整数');
   const org = orgArg(orgId);
 
-  return (await tx.query(`SELECT * FROM fn_exam_missing($1,$2)`,
-    [Number(paperId), org])).rows
+  return (await tx.query(`SELECT m.* FROM fn_exam_missing($1,$2) m WHERE fn_ty_training_person_visible($3,m.person_id,app_today())`,
+    [Number(paperId), org,userId])).rows
     .map((r) => ({
       person_id: Number(r.person_id),
       person_name: r.person_name,
@@ -232,7 +238,7 @@ export async function missing(tx, { userId, paperId, orgId }) {
  * ★ 已交卷的答卷不能补记（库里 E_EXAM_SUBMITTED）—— 补记等于事后栽赃。
  */
 export async function logEvent(tx, { userId, attemptId, kind, detail }) {
-  await requireSession(tx, { userId, resource: RESOURCES.write, action: 'write' });
+  await trainingAttemptAccess(tx,{userId,attemptId:Number(attemptId),action:'write'});
   if (!isId(Number(attemptId))) throw bizErr('E_ARG_INVALID', 'attempt 必须是正整数');
   const k = String(kind || '').trim();
   if (!CHEAT_KINDS.includes(k)) {
@@ -255,6 +261,7 @@ export async function logEvent(tx, { userId, attemptId, kind, detail }) {
 /** 某份答卷的全部事件（监考页，交卷前后都能看） */
 export async function cheat(tx, { userId, attemptId }) {
   await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
+  await trainingAttemptAccess(tx,{userId,attemptId:Number(attemptId),action:'read'});
   if (!isId(Number(attemptId))) throw bizErr('E_ARG_INVALID', 'attempt 必须是正整数');
 
   const rows = (await tx.query(`SELECT * FROM fn_exam_cheat($1)`,
@@ -272,8 +279,8 @@ export async function flagged(tx, { userId, paperId }) {
   await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
   if (!isId(Number(paperId))) throw bizErr('E_ARG_INVALID', 'paper 必须是正整数');
 
-  return (await tx.query(`SELECT * FROM fn_exam_flagged($1)`,
-    [Number(paperId)])).rows
+  return (await tx.query(`SELECT f.* FROM fn_exam_flagged($1) f JOIN exam_attempt a ON a.id=f.attempt_id WHERE fn_ty_training_person_visible($2,a.employee_id,(a.started_at AT TIME ZONE app_tz())::date)`,
+    [Number(paperId),userId])).rows
     .map((r) => ({
       person_name: r.person_name,
       attempt_id: Number(r.attempt_id),

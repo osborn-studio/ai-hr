@@ -2,7 +2,7 @@
 // or a permanent identity as data moves through the editable workbench.
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {flattenCompanyMetrics,buildPerformanceInputs,verifyPerformanceProposal,exactAmount,businessSettings,validateBusinessScope,employmentOverlaps} from '../app/customer-workbench.mjs';
+import {flattenCompanyMetrics,buildPerformanceInputs,verifyPerformanceProposal,exactAmount,businessSettings,validateBusinessScope,employmentOverlaps,canEditBusiness} from '../app/customer-workbench.mjs';
 let passed=0;
 const check=(name,fn)=>{fn();passed++;console.log(`✓ ${name}`);};
 const source={company_id:11,period:'2026-07',source_saved_score:.98,source_ref:{sheet:'汇总',range:'A5:W5'},metrics:{quality:{value:.97,unit:'ratio',status:'unverified',source_ref:{sheet:'汇总',cell:'C5'}},loss:{value:0,unit:'ratio',status:'source_error',source_ref:{sheet:'汇总',cell:'D5',raw_error:'#N/A'}}}};
@@ -40,6 +40,11 @@ check('region must match independently from currency',()=>assert.throws(()=>vali
 check('employment ended before a cycle is not a mapping candidate',()=>assert.equal(employmentOverlaps({hire_date:'2026-01-01',leave_date:'2026-06-30',status:'ended'},'2026-07-01','2026-10-01'),false));
 check('employment leave date on period start remains a valid candidate',()=>assert.equal(employmentOverlaps({hire_date:'2026-01-01',leave_date:'2026-07-01',status:'ended'},'2026-07-01','2026-10-01'),true));
 check('employment starting on exclusive cycle end is not a candidate',()=>assert.equal(employmentOverlaps({hire_date:'2026-10-01',status:'active'},'2026-07-01','2026-10-01'),false));
+check('read-only payroll authority never becomes editable because a batch is draft',()=>assert.equal(canEditBusiness('payroll',{resources:{payroll_run:{can_read:true,can_write:false}}},{locked:false,complete:true}),false));
+check('payroll write authority still cannot edit a locked batch',()=>assert.equal(canEditBusiness('payroll',{resources:{payroll_run:{can_write:true}}},{locked:true}),false));
+check('payroll partial scope cannot become an editable full batch',()=>assert.equal(canEditBusiness('payroll',{resources:{payroll_run:{can_write:true}}},{complete:false}),false));
+check('performance read authority never grants rule creation',()=>assert.equal(canEditBusiness('performance',{resources:{perf_cycle:{can_read:true,can_write:false}}}),false));
+check('full payroll writer retains draft editing',()=>assert.equal(canEditBusiness('payroll',{resources:{payroll_run:{can_write:true}}}),true));
 const original=await readFile(new URL('../app/index.html',import.meta.url),'utf8'),workspace=await readFile(new URL('../app/workspace.mjs',import.meta.url),'utf8');
 const oldTabs=original.match(/const TABS = \[([\s\S]*?)\n\];/)[1];
 const oldKeys=[...oldTabs.matchAll(/key:\s*'([^']+)'/g)].map(m=>m[1]);

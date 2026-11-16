@@ -16,8 +16,9 @@
 // ============================================================================
 import { requireSession } from './guard.mjs';
 import { bizErr } from '../errors.mjs';
+import { accountPerson,personaFor,trainingPersonAccess,trainingAttemptAccess,trainingPaperAccess } from './persona-guard.mjs';
 
-export const RESOURCES = { read: 'employee_roster', write: 'employee_roster' };
+export const RESOURCES = { read: 'training_manage', write: 'training_manage' };
 
 const KINDS = ['single', 'multi', 'judge'];
 const isId = (v) => Number.isInteger(v) && v > 0;
@@ -35,17 +36,17 @@ export async function board(tx, { userId }) {
             c.id AS course_id, c.name AS course_name, c.category, c.std_hours,
             (SELECT count(*)::int FROM exam_question q WHERE q.paper_id = p.id) AS questions,
             (SELECT COALESCE(sum(q.score), 0) FROM exam_question q WHERE q.paper_id = p.id) AS total_score,
-            (SELECT count(*)::int FROM exam_attempt a WHERE a.paper_id = p.id) AS attempts,
+            (SELECT count(*)::int FROM exam_attempt a WHERE a.paper_id = p.id AND fn_ty_training_person_visible($1,a.employee_id,(a.started_at AT TIME ZONE app_tz())::date)) AS attempts,
             (SELECT count(*)::int FROM exam_attempt a
-              WHERE a.paper_id = p.id AND a.passed) AS passed,
+              WHERE a.paper_id = p.id AND fn_ty_training_person_visible($1,a.employee_id,(a.started_at AT TIME ZONE app_tz())::date) AND a.passed) AS passed,
             -- 发出去还没交的卷：这个数大说明有人在挂着，不是"考得慢"就是"忘了"
             (SELECT count(*)::int FROM exam_attempt a
-              WHERE a.paper_id = p.id AND a.submitted_at IS NULL) AS open_attempts,
+              WHERE a.paper_id = p.id AND fn_ty_training_person_visible($1,a.employee_id,(a.started_at AT TIME ZONE app_tz())::date) AND a.submitted_at IS NULL) AS open_attempts,
             -- 超时交的卷：156 只记不拦，所以这个数要能看见，否则"记了没人看"等于没记
             (SELECT count(*)::int FROM exam_attempt a
-              WHERE a.paper_id = p.id AND COALESCE(a.late_seconds, 0) > 0) AS late_count
+              WHERE a.paper_id = p.id AND fn_ty_training_person_visible($1,a.employee_id,(a.started_at AT TIME ZONE app_tz())::date) AND COALESCE(a.late_seconds, 0) > 0) AS late_count
        FROM exam_paper p JOIN training_course c ON c.id = p.course_id
-      ORDER BY p.is_active DESC, c.name, p.code`)).rows;
+      ORDER BY p.is_active DESC, c.name, p.code`,[userId])).rows;
 
   // 及格率的分母是"交过卷的"，不是"发过的卷"：
   // 把没交的算进去会让及格率看起来低，而那是"还没考"，不是"考不过"。
@@ -74,7 +75,7 @@ export async function board(tx, { userId }) {
  *   让人答完 100 分的卷才被告知"你已经没机会了"，比一开始就不让他考更糟。
  */
 export async function ledger(tx, { userId, paperId, employeeId }) {
-  await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
+  await trainingPersonAccess(tx,{userId,personId:employeeId,action:'read'});
   if (!isId(paperId)) throw bizErr('E_ARG_INVALID', 'paper 必须是正整数');
   if (!isId(employeeId)) throw bizErr('E_ARG_INVALID', 'employee 必须是正整数（person.id）');
 
@@ -161,7 +162,7 @@ export async function createPaper(tx, { userId, courseId, code, name,
  * ★ 只有题干/选项/分值，**没有答案** —— 答案随卷下发，这场考试就没有意义了。
  */
 export async function paper(tx, { userId, paperId }) {
-  await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
+  await trainingPaperAccess(tx,{userId});
   if (!isId(paperId)) throw bizErr('E_ARG_INVALID', 'paper 必须是正整数');
 
   const rows = (await tx.query(
@@ -190,7 +191,7 @@ export async function paper(tx, { userId, paperId }) {
 
 /** 发卷：返回 attempt id。同一人同一卷已有未交的一份时，返回的仍是那一份。 */
 export async function start(tx, { userId, paperId, employeeId, sessionId }) {
-  await requireSession(tx, { userId, resource: RESOURCES.write, action: 'write' });
+  await trainingPersonAccess(tx,{userId,personId:employeeId,action:'write'});
   if (!isId(paperId)) throw bizErr('E_ARG_INVALID', 'paper 必须是正整数');
   if (!isId(employeeId)) throw bizErr('E_ARG_INVALID', 'employee 必须是正整数（person.id）');
   if (sessionId !== null && sessionId !== undefined && sessionId !== ''
@@ -198,6 +199,11 @@ export async function start(tx, { userId, paperId, employeeId, sessionId }) {
     throw bizErr('E_ARG_INVALID', 'session 必须是正整数（场次 id）');
   }
 
+  if(sessionId&&await personaFor(tx,userId)) {
+    const enrollment=(await tx.query(`SELECT 1 FROM training_enrollment e JOIN training_session s ON s.id=e.session_id
+      JOIN exam_paper p ON p.course_id=s.course_id WHERE e.session_id=$1 AND e.employee_id=$2 AND p.id=$3 AND e.status<>'cancelled'`,[Number(sessionId),employeeId,paperId])).rows[0];
+    if(!enrollment)throw bizErr('E_RESOURCE_FORBIDDEN','场次必须是该员工已报名的对应课程');
+  }
   const attemptId = Number((await tx.query(
     `SELECT fn_exam_start($1,$2,$3) i`,
     [paperId, employeeId, sessionId ? Number(sessionId) : null])).rows[0].i);
@@ -233,7 +239,7 @@ export async function start(tx, { userId, paperId, employeeId, sessionId }) {
  * ★ 多选必须完全一致才得分：选一半给 0。给部分分等于让人"全选"攒到及格线。
  */
 export async function submit(tx, { userId, attemptId, answers }) {
-  await requireSession(tx, { userId, resource: RESOURCES.write, action: 'write' });
+  await trainingAttemptAccess(tx,{userId,attemptId,action:'write'});
   if (!isId(attemptId)) throw bizErr('E_ARG_INVALID', 'attempt 必须是正整数');
   if (!Array.isArray(answers)) {
     throw bizErr('E_ARG_INVALID', 'answers 要是数组，形如 [{q:1,picked:"A"}]');
@@ -274,7 +280,7 @@ export async function submit(tx, { userId, attemptId, answers }) {
  *   交卷后给答案是为了错题回顾 —— 这是行业常规，也是"考完能学到东西"的唯一方式。
  */
 export async function result(tx, { userId, attemptId }) {
-  await requireSession(tx, { userId, resource: RESOURCES.read, action: 'read' });
+  await trainingAttemptAccess(tx,{userId,attemptId,action:'read'});
   if (!isId(attemptId)) throw bizErr('E_ARG_INVALID', 'attempt 必须是正整数');
 
   const a = (await tx.query(
@@ -325,7 +331,20 @@ export async function attempts(tx, { userId, paperId }) {
             a.score, a.passed, a.deadline_at, a.late_seconds
        FROM exam_attempt a
        LEFT JOIN person pe ON pe.id = a.employee_id
-      WHERE a.paper_id = $1
-      ORDER BY a.submitted_at DESC NULLS FIRST, a.id DESC`, [paperId])).rows
+      WHERE a.paper_id = $1 AND fn_ty_training_person_visible($2,a.employee_id,(a.started_at AT TIME ZONE app_tz())::date)
+      ORDER BY a.submitted_at DESC NULLS FIRST, a.id DESC`, [paperId,userId])).rows
     .map((r) => ({ ...r, score: num(r.score) }));
+}
+
+/** Active shared papers; every score and attempt count belongs to the session user. */
+export async function myBoard(tx,{userId}) {
+  await requireSession(tx,{userId,resource:'training_self',action:'read'});
+  const person=await accountPerson(tx,userId);
+  const rows=(await tx.query(`SELECT p.id,p.code,p.name,p.pass_score,p.max_attempts,p.duration_min,c.name AS course_name,
+    (SELECT count(*)::int FROM exam_attempt a WHERE a.paper_id=p.id AND a.employee_id=$1) AS used,
+    (SELECT max(a.score) FROM exam_attempt a WHERE a.paper_id=p.id AND a.employee_id=$1 AND a.submitted_at IS NOT NULL) AS best_score
+    FROM exam_paper p JOIN training_course c ON c.id=p.course_id
+    WHERE p.is_active AND c.is_active ORDER BY c.name,p.code`,[person])).rows;
+  return {person,papers:rows.map(p=>({...p,used:Number(p.used),pass_score:num(p.pass_score),best_score:num(p.best_score),max_attempts:num(p.max_attempts),
+    left_attempts:p.max_attempts===null?null:Math.max(0,Number(p.max_attempts)-Number(p.used))}))};
 }

@@ -12,8 +12,9 @@
 import { requireSession, requireOrg } from './guard.mjs';
 import { inStationScope } from './scope.mjs';
 import { bizErr } from '../errors.mjs';
+import { accountPerson } from './persona-guard.mjs';
 
-export const RESOURCES = { read: 'employee_roster', write: 'employee_roster' };
+export const RESOURCES = { read: 'training_manage', write: 'training_manage' };
 
 const CATS = ['safety', 'onboarding', 'skill', 'compliance'];
 const isId = (v) => Number.isInteger(v) && v > 0;
@@ -216,9 +217,11 @@ export async function attend(tx, { userId, enrollId, hours }) {
 
 /** 逐场次日期判断范围，不能由当前雇佣授权贯通无权历史。 */
 export async function detail(tx,{userId,personId,year}) {
-  await requireSession(tx,{userId,resource:RESOURCES.read,action:'read'});
   if(!isId(personId))throw bizErr('E_ARG_INVALID','person 必须是正整数');
   const y=await businessYear(tx,year);
+  const canManage=!!(await tx.query("SELECT fn_role_can($1,'training_manage','read') ok",[userId])).rows[0].ok;
+  await requireSession(tx,{userId,resource:canManage?'training_manage':'training_self',action:'read'});
+  if(!canManage&&personId!==await accountPerson(tx,userId))throw bizErr('E_RESOURCE_FORBIDDEN','只能查看本人的学习记录');
   // A visible employee with no enrollment still has a valid empty detail. Check
   // relevant employment/assignment boundary dates rather than only today.
   const allowed=(await tx.query(`WITH boundary AS (
@@ -238,4 +241,12 @@ export async function detail(tx,{userId,personId,year}) {
       AND ${personVisible('e.employee_id',sessionDay('s'),'s.legal_entity_id','$3')}
     ORDER BY s.starts_at DESC`,[personId,y,userId])).rows;
   return {person:personId,year:y,rows,hours:rows.filter(r=>r.status==='completed').reduce((sum,r)=>sum+Number(r.attended_hours),0)};
+}
+
+
+/** Employee self-service never accepts a caller-supplied employee ID. */
+export async function myTraining(tx,{userId,year}) {
+  await requireSession(tx,{userId,resource:'training_self',action:'read'});
+  const personId=await accountPerson(tx,userId);
+  return detail(tx,{userId,personId,year});
 }

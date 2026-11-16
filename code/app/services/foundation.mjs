@@ -1,5 +1,6 @@
 // New company/organization domain. Legacy business modules remain independently authorized.
 import { bizErr } from '../errors.mjs';
+import { personaFor } from './persona-guard.mjs';
 
 const COLLECTIONS = {
   groups: ['ty_group', ['code','name','status']],
@@ -28,8 +29,11 @@ export async function accessFor(tx, userId) {
   const admin = !!(await tx.query("SELECT fn_role_can($1,'ledger','write') ok",[userId])).rows[0].ok;
   const grants = (await tx.query(`SELECT * FROM ty_access_grant WHERE account_id=$1 AND can_read
     AND valid_from<=current_date AND (valid_to IS NULL OR current_date<valid_to)`,[userId])).rows;
+  const persona=await personaFor(tx,userId);
+  const selfOnly=!!persona&&['store_staff','station_staff'].includes(persona.profile_code);
   return {
-    admin, grants,
+    admin, grants, persona, selfOnly, selfPersonId:selfOnly?persona.person_id:null,
+    canEmploymentWrite:!!(await tx.query("SELECT fn_role_can($1,'employment_manage','write') ok",[userId])).rows[0].ok,
     group(gid, write=false) { return admin || grants.some(g=>eq(g.group_id,gid) && (!write || g.can_write)); },
     shared(gid,write=false) { return admin || grants.some(g=>eq(g.group_id,gid) && (!write || (g.can_write && !g.ledger_id && !g.company_id))); },
     row(row,write=false) { return admin || grants.some(g=>eq(g.group_id,row.group_id) && (!write || g.can_write)
@@ -53,6 +57,12 @@ async function withContext(tx, collection, row) {
   return row;
 }
 async function check(tx, access, collection, row, write) {
+  if(write&&access.persona) {
+    if(['groups','brands','ledgers','grants'].includes(collection)&&!['config_admin','demo'].includes(access.persona.profile_code))deny('集团品牌帐套与授权仅由系统配置岗位维护');
+    if(['people','external-identities','employments','assignments'].includes(collection)&&!access.canEmploymentWrite)deny('人员与雇佣业务维护需要人事岗位写权限');
+    if(!['people','external-identities','employments','assignments','groups','brands','ledgers','grants'].includes(collection)&&!['config_admin','demo','hr_manager'].includes(access.persona.profile_code))deny('组织岗位配置需要系统配置或HR主管授权');
+  }
+
   if(collection==='groups') { if(!access.admin) deny('集团建立与修改仅限平台基础管理员'); return; }
   if(collection==='grants') { if(!access.admin) deny('授权范围维护仅限平台基础管理员'); return; }
   const ctx=await withContext(tx,collection,row);
@@ -97,11 +107,11 @@ export async function bootstrap(tx,{userId,groupId,ledgerId,companyId}) {
   const ids=scoped.map(c=>Number(c.id));
   const shared=async table=>gid?(await tx.query(`SELECT * FROM ${table} WHERE group_id=$1 ORDER BY id`,[gid])).rows:[];
   const owned=async table=>ids.length?(await tx.query(`SELECT * FROM ${table} WHERE company_id=ANY($1::bigint[]) ORDER BY id`,[ids])).rows:[];
-  const employments=await owned('ty_employment');
-  const people=(await shared('ty_person')).filter(p=>access.shared(gid,true)||access.admin
+  const employments=(await owned('ty_employment')).filter(e=>!access.selfOnly||eq(e.person_id,access.selfPersonId));
+  const people=(await shared('ty_person')).filter(p=>(!access.selfOnly||eq(p.id,access.selfPersonId))&&(access.shared(gid,true)||access.admin
     ||access.grants.some(g=>eq(g.group_id,gid)&&!g.ledger_id&&!g.company_id)
-    ||employments.some(e=>eq(e.person_id,p.id)));
-  const assignments=await owned('ty_position_assignment');
+    ||employments.some(e=>eq(e.person_id,p.id))));
+  const assignments=(await owned('ty_position_assignment')).filter(a=>employments.some(e=>eq(e.id,a.employment_id)));
   const grants=access.admin ? await shared('ty_access_grant'):access.grants.filter(g=>eq(g.group_id,gid));
   // Company-only grants derive their ledger from the actual company row. A null
   // grant.ledger_id must not turn company A's write permission into ledger B's
@@ -175,7 +185,7 @@ export async function deactivate(tx,{userId,collection,id}) {
 export async function timeline(tx,{userId,personId}) {
   const access=await accessFor(tx,userId);
   const p=(await tx.query('SELECT * FROM ty_person WHERE id=$1',[personId])).rows[0];
-  if(!p||!access.group(p.group_id))notFound();
+  if(!p||!access.group(p.group_id)||(access.selfOnly&&!eq(p.id,access.selfPersonId)))notFound();
   const all=(await tx.query(`SELECT e.*,c.ledger_id,c.name company_name,l.name ledger_name FROM ty_employment e
     JOIN ty_company c ON c.id=e.company_id JOIN ty_ledger l ON l.id=c.ledger_id WHERE e.person_id=$1 ORDER BY e.hire_date,e.id`,[personId])).rows;
   const employments=all.filter(e=>access.row(e));
