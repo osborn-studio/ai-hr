@@ -3,6 +3,17 @@
 这份文件是给**下一个在这个仓库里写代码的人或 AI**（含 codex）看的。
 `README.md` 讲的是"这套系统为什么这样设计"，这一页只讲"在这里动手要遵守什么"。
 
+
+## 2026-11-16 接续基线
+
+当前开发入口为 `/workspace`，产品名为天意人力资源系统（ty-hr）。先读 `docs/53_新版工作台与测试帐套.md`。原业务代码继续保留；001–192 是原迁移，新版从193起增量扩展，已应用迁移不得修改。
+
+测试组织为天意集团，香香鱼米（CN/CNY）、大富烤肉（HK/HKD）各10家门店，总部为独立集团帐套。所有测试记录必须独立虚构，客户原件只用于理解格式，不得自动导入到演示库。地区与币种从配置读取，不能根据品牌名称猜测；两种货币不得直接求和。香港主体不得走原内地算薪。
+
+初始化持久库先运行 `node tools/init-workspace.mjs`，再运行 `node tools/init-test-workspace.mjs --confirm-synthetic`。用 `SEED_SKIP=1` 避免旧小样本。随机凭据只写本地 `TYHR_RUNTIME_DIR/workspace-access.json`，不得提交。测试帐套会为自己新建的虚构组织/主体建立显式旧业务范围；普通映射不自动扩大权限。
+
+`npm test` 包含原业务和新版测试；`npm run test:new` 可单独检查新版，`npm run verify:docs -- --fast --strict` 比对对象数。真实 PostgreSQL 测试需每套隔离空库，不能串用含测试残留的库。下文旧断言条数和迁移编号属于原交接记录，以当前脚本与实跑输出为准。
+
 ---
 
 ## 一、五分钟把它跑起来
@@ -10,7 +21,7 @@
 ```bash
 cd code
 npm install          # 只有一个依赖：@electric-sql/pglite（PostgreSQL 编译成 WASM）
-npm test             # 311 库 + 163 接口 + 4 持久化 + 5 备份 + 8 契约 + 5 界面，全绿才算改对了
+npm test             # 原业务和新版完整回归，以各套输出为准
 npm run serve        # http://127.0.0.1:8787（内存库，重启即清空）
 npm run serve:persist  # 落盘到 ./.data（重启不丢；持久化断言 P1–P4 守这条）
 npm run demo           # 跑接口断言 + 起同一套库的服务（自检页才有结论）
@@ -19,12 +30,12 @@ npm run test:ui        # 界面冒烟（用本机 Chrome --headless --dump-dom�
 npm run verify:docs    # 文档数字与真实库比对（--strict 有差异即 exit 1；--fast 不跑测试）
 ```
 
-`npm test` 会连跑五套（每套各起一个 PGlite 实例）。**内存小的机器上可能被 OOM kill**
+`npm test` 按 package.json 依次运行原业务与新版测试（各自隔离数据）。**内存小的机器上可能被 OOM kill**
 （表现为 `Killed: 9` / exit 137，看起来像"测试挂了"实则不是）。分开跑即可：
 `npm run test:db`、`npm run test:api`、`npm run test:persist`、`npm run test:backup`、`npm run test:contract`。
 
 不需要 Docker、不需要本机装 PostgreSQL。数据库每次测试都**从空库全量重建**
-（`001` → `062` 顺序执行），没有任何"上次残留的状态"。
+（从 `db/` 自动派生当前连续迁移顺序执行），没有任何"上次残留的状态"。
 
 页面用 `?as=N#tab` 直达身份与页签：
 `/#home`（工作台，默认）、`/#dashboard`（看板）、`/#attendance`、`/#payslip`、`/#close`、`/#payroll`、

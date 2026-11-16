@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#19334f">
+  <title>天意人力资源系统</title>
+  <link rel="stylesheet" href="/workspace.css">
+  <script type="module" src="/workspace.mjs"></script>
+</head>
+<body>
+  <section class="login-screen" id="loginScreen" hidden>
+    <div class="login-intro">
+      <div class="brand-mark">TY</div>
+      <p class="eyebrow">TIANYI HUMAN RESOURCES</p>
+      <h1>天意人力资源系统</h1>
+      <p>让每一家门店、每一个岗位、每一段任职清晰有序。</p>
+      <div class="login-features"><span>本地部署</span><span>多帐套</span><span>餐饮多门店</span></div>
+    </div>
+    <form class="login-card" id="loginForm">
+      <h2>登录工作台</h2>
+      <p class="muted">使用已分配的账号，进入你的管理范围。</p>
+      <label>账号编号<input id="loginUser" name="user" inputmode="numeric" autocomplete="username" required placeholder="输入账号编号"></label>
+      <label>密码<input id="loginPassword" name="password" type="password" autocomplete="current-password" required placeholder="输入密码"></label>
+      <div class="form-error" id="loginError" role="alert" hidden></div>
+      <button class="primary login-submit" type="submit">登录</button>
+      <details class="demo-details"><summary>本机开发演示</summary><p>开发演示账号为 1000，密码见本地交付说明。请勿使用客户真实账号进行演示。</p><button type="button" class="text-button" id="fillDemo">填入开发账号</button></details>
+    </form>
+  </section>
+
+  <div class="workspace" id="workspace" hidden>
+    <aside class="sidebar" id="sidebar">
+      <a class="product-logo" href="#home"><span class="brand-mark small">TY</span><span>天意人力资源系统<small>餐饮多门店人力管理</small></span></a>
+      <nav id="navigation" aria-label="主导航"></nav>
+      <div class="sidebar-footer"><span class="status-dot"></span>本地工作空间</div>
+    </aside>
+    <div class="main-shell">
+      <header class="topbar">
+        <button class="icon-button menu-toggle" id="menuToggle" aria-label="展开导航">☰</button>
+        <div class="breadcrumb" id="breadcrumb">工作台</div>
+        <div class="account"><span class="avatar" id="avatar">人</span><span id="accountName">—</span><button class="text-button" id="logout">退出</button></div>
+      </header>
+      <section class="contextbar" aria-label="当前业务范围">
+        <label>集团<select id="groupContext" aria-label="当前集团"></select></label>
+        <label>帐套<select id="ledgerContext" aria-label="当前帐套"></select></label>
+        <label>公司<select id="companyContext" aria-label="当前公司"></select></label>
+        <span class="context-help" id="contextHelp">基础资料按当前范围显示</span>
+      </section>
+      <main id="content" tabindex="-1" aria-live="polite"></main>
+    </div>
+  </div>
+
+  <dialog id="editor" aria-labelledby="editorTitle">
+    <form id="editorForm">
+      <div class="dialog-head"><div><p class="eyebrow" id="editorEyebrow">基础资料</p><h2 id="editorTitle">新增</h2></div><button class="icon-button" type="button" id="closeEditor" aria-label="关闭">×</button></div>
+      <p class="editor-note" id="editorNote"></p>
+      <div class="field-grid" id="editorFields"></div>
+      <div class="form-error" id="editorError" role="alert" hidden></div>
+      <footer class="dialog-footer"><button type="button" id="cancelEditor">取消</button><button class="primary" type="submit" id="saveEditor">保存</button></footer>
+    </form>
+  </dialog>
+  <dialog id="detail" aria-labelledby="detailTitle"><div class="dialog-head"><h2 id="detailTitle">人员经历</h2><button class="icon-button" id="closeDetail" aria-label="关闭">×</button></div><div id="detailBody"></div></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

@@ -665,6 +665,41 @@ code,pre{background:#f3f6ff;border:1px solid #dbe6ff;color:#1e3a8a;border-radius
   button { min-width: 44px; }
 }
 </style>
+<style>
+/* Compatibility views keep their original controls; the workbench supplies the outer shell. */
+html.ty-embed body > header,
+html.ty-embed #banner,
+html.ty-embed #tabs { display:none !important; }
+html.ty-embed body { background:var(--bg); }
+html.ty-embed main { max-width:none; padding:16px 20px; }
+.ty-context-note { margin:0 0 12px; padding:9px 12px; border:1px solid var(--line);
+  border-radius:7px; color:var(--fg-2,var(--dim)); background:var(--panel); font-size:12px; }
+.ty-section-nav { display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+  margin:0 0 14px; padding:10px; border:1px solid var(--line); border-radius:9px;
+  background:var(--panel); }
+html.ty-embed .ty-section-nav { position:sticky; top:0; z-index:18; }
+.ty-section-nav button { max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+.ty-section-nav button[aria-pressed="true"] { background:var(--primary,var(--accent)); color:#fff;
+  border-color:var(--primary,var(--accent)); }
+[data-ty-section-hidden="1"], [data-ty-page-hidden="1"] { display:none !important; }
+.ty-page-controls { display:flex; align-items:center; flex-wrap:wrap; gap:7px;
+  margin:10px 0; padding:9px 0; font-size:12px; color:var(--fg-2,var(--dim)); }
+.ty-page-controls label { display:flex; flex-direction:row; gap:5px; align-items:center; }
+.ty-page-controls select { min-height:32px; width:auto; }
+.ty-page-controls button { padding:5px 9px; }
+.ty-page-controls [aria-current="page"] { background:var(--primary,var(--accent)); color:#fff; }
+.ty-page-summary-note { display:block; flex-basis:100%; font-size:11px; }
+@media(max-width:720px) {
+  html.ty-embed main { padding:10px; }
+  .ty-section-nav { flex-wrap:nowrap; overflow-x:auto; }
+  .ty-section-nav button { flex:0 0 auto; max-width:82vw; }
+  .ty-page-controls button,.ty-page-controls select { min-height:44px; }
+}
+@media print {
+  .ty-section-nav, .ty-page-controls, .ty-context-note { display:none !important; }
+  [data-ty-section-hidden="1"], [data-ty-page-hidden="1"] { display:revert !important; }
+}
+</style>
 </head>
 <body>
 <header>
@@ -689,6 +724,8 @@ code,pre{background:#f3f6ff;border:1px solid #dbe6ff;color:#1e3a8a;border-radius
 </main>
 
 <script>
+const EMBED_MODE = new URLSearchParams(location.search).get('embed') === '1';
+document.documentElement.classList.toggle('ty-embed', EMBED_MODE);
 // 演示帐套（香香鱼米）的集团账号。**每个账号带自己的口令** —— 这一点很重要：
 // 原来这张表只有 id 和名字，口令统一取 DEMO_PWD，而新帐套里 1 号（系统管理员）
 // 的口令是 admin1234 → 页面自动 login(1) 必然失败，于是"打开就是一片空白"。
@@ -766,7 +803,7 @@ const TABS = [
 
   { key: 'recruit',    name: '招聘',     desc: '需求、候选人、录用' },
   { key: 'perf',       name: '绩效',     desc: '周期、目标、评分与分发' },
-  { key: 'training',   name: '培训学习', desc: '课程、学时、结业（规划中）' },
+  { key: 'training',   name: '培训学习', desc: '课程、学时、结业与考试' },
 
   { key: 'dashboard',  name: '数据看板', desc: '人效、成本、出勤趋势' },
   { key: 'report',     name: '报表',     desc: '导出与对账' },
@@ -800,30 +837,10 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // ============================================================================
-// 长列表：前 100 行 + 「显示全部」
-// ----------------------------------------------------------------------------
-// 为什么需要它：手机端把宽表卡片化之后，一行从 29px 变成 104–157px。
-// 实测「工资条」1,122 行 → 页高 127,338px（约 157 屏），「工资调整」374 行 → 62,910px。
-// 每一行都读得清了，但"找一个要调薪的人"要滑 157 屏，比宽表更难受。
-//
-// ★ 为什么不是分页控件：手机上分页按钮点不准，而且这是演示不是生产；
-//   为什么不是 max-height + overflow:auto：卡片里套一个竖向滚动框，
-//   滑到底会突然开始滚整页，那个"滚错了对象"的体验比页长长更糟。
-// ★ 为什么按钮上要写"还有 N 行"：默默只显示 100 行，会让人以为是"就这么多人"
-//   —— 被截断必须说出来，这和"0 行不是没有数据"是同一条纪律。
-// ★ 展开状态记在这里而不是每次渲染重置：切页签回来还保持展开，符合直觉。
-//   重置点是"刷新数据"（reload / 重新取数），不是"重新渲染"。
-const ROWS_FIRST = 100;
-const SHOW_ALL = Object.create(null);   // { payslip: true, adjust: true, ... }
-
-/** 取这一页实际要渲染的行；展开过就全给。 */
-const rowsToShow = (key, rows) =>
-  (SHOW_ALL[key] ? rows : rows.slice(0, ROWS_FIRST));
-
-/** 被截断时给一个按钮。没截断就什么都不给（不给"共 3 行"这种废话）。 */
-const moreRowsBtn = (key, total, shown) => (total <= shown ? '' :
-  `<button class="ghost" data-more="${key}" style="margin-top:8px">
-     还有 <b>${total - shown}</b> 行没显示，点这里展开（共 ${total} 行）</button>`);
+// Keep every authorized record in the original DOM. Pagination below only toggles
+// row visibility, so event handlers, input values and full-result totals survive.
+const rowsToShow = (key, rows) => rows;
+const moreRowsBtn = () => '';
 
 // ============================================================================
 // 实发：多人清单里默认遮住，点一下看
@@ -892,8 +909,6 @@ const netCell = (safeText, hide) => (hide
 // 同一个监听里也处理"实发"的点击显示 —— 两件事都是"点一下改一个属性"，
 // 分包监听只会让"点了没反应"更难查。
 document.addEventListener('click', (e) => {
-  const more = e.target.closest && e.target.closest('[data-more]');
-  if (more) { SHOW_ALL[more.dataset.more] = true; return load(); }
   const net = e.target.closest && e.target.closest('[data-net]');
   if (net) {
     const hidden = net.dataset.hidden !== '0';
@@ -959,6 +974,10 @@ async function openPrint(path) {
 //   截图看上去就是"系统挂了/一片空白"，而真实原因是"这个账号登不上"。
 //   摆一排可点的账号比任何错误码都管用：现场三秒能换一个进去。
 function renderLoginFallback(reason) {
+  if (EMBED_MODE) {
+    renderEmbeddedSessionMessage(reason || '工作台会话不可用，请从工作台重新登录。');
+    return;
+  }
   const el = document.querySelector('#view');
   if (!el) return;
   el.innerHTML = `
@@ -966,7 +985,7 @@ function renderLoginFallback(reason) {
       <h2>登录没成功，换一个账号试试</h2>
       <p class="note" style="color:var(--bad)">${esc(reason || '账号或口令不正确')}</p>
       <div class="form" style="flex-wrap:wrap; gap:8px">
-        ${USERS.map((u) => `<button class="ghost" data-login="${u.id}"
+        ${(EMBED_MODE ? [] : USERS).map((u) => `<button class="ghost" data-login="${u.id}"
             title="${esc(u.hint)}">${esc(u.name)}（${esc(u.hint)}）</button>`).join('')}
       </div>
       <p class="sub">也可以直接带参进：<code>/?u=2&amp;pwd=demo1234</code>
@@ -979,6 +998,12 @@ function renderLoginFallback(reason) {
 }
 
 async function login(id, pwd = null) {
+  // Embedded views accept only a verified, same-origin workbench session.
+  // Old demo-account buttons must never become an authentication fallback here.
+  if (EMBED_MODE) {
+    renderEmbeddedSessionMessage('请使用工作台登录，兼容业务页不会自行切换账号。');
+    return;
+  }
   uid = id;
   // ★ 第二个参数是给"不是演示那 5 个身份"的账号用的（真实帐套里 30 多个人）。
   //   不传就仍按演示口令表走 —— 既有行为不变。
@@ -5109,6 +5134,10 @@ async function viewClose() {
 // 一个永远不动的月份，而"这期能不能封账"恰恰是逐期不同的答案。
 let PAY_PERIOD = null;
 
+function selectMonthlyRun(runs, period, entity) {
+  return runs.find(x => x.period === period && Number(x.legal_entity_id) === Number(entity) && x.kind === 'monthly');
+}
+
 async function viewPayroll() {
   const [runs, pol, ents] = await Promise.all([
     call('/api/payroll/runs'),
@@ -5125,7 +5154,7 @@ async function viewPayroll() {
   const P = PAY_PERIOD || (RUNS[0] ? RUNS[0].period : TODAY.slice(0, 7));
   const unclosed = await call(`/api/attendance/unclosed?period=${P}`);
   const blocked = (unclosed.body.rows || []).length;
-  const run = RUNS.find(x => x.period === P);
+  const run = selectMonthlyRun(RUNS, P, CUR_ENTITY);
 
   let slipsHtml = '';
   let consistHtml = '';
@@ -5163,7 +5192,7 @@ async function viewPayroll() {
              : netCell(esc(x.net_amount), payMask)}
            </tr>`).join('')}</tbody></table>
          ${moreRowsBtn('payroll', rows.length, payShown.length)}
-         <div class="kv">${payShown.map(x=>`<span>员工${x.employee_id} 明细：<b>${x.items.map(i=>i.item_code).join(' / ')}</b></span>`).join('')}</div>`;
+         <div class="kv" data-ty-page-annotations>${payShown.map(x=>`<span>员工${x.employee_id} 明细：<b>${x.items.map(i=>i.item_code).join(' / ')}</b></span>`).join('')}</div>`;
     consistHtml = `<div class="kv"><span>勾稽（必须为空）：
       <span class="tag ${cs.body.ok ? 'ok' : 'bad'}">${cs.body.ok ? '通过' : cs.body.rows.length + ' 条不一致'}</span></span></div>`;
   }
@@ -10282,8 +10311,8 @@ function fail(r) {
       <h2>这个页面你的角色看不了</h2>
       <p class="note">岗位权限拒绝（\`${esc(r.body.error || 'E_RESOURCE_FORBIDDEN')}\`）。
         它不是系统故障——是这个账号没有对应资源的读权限。</p>
-      <div class="form" style="flex-wrap:wrap;gap:8px">
-        ${USERS.map((u) => `<button class="ghost" data-login="${u.id}"
+      <div class="form" style="flex-wrap:wrap;gap:8px" ${EMBED_MODE ? 'hidden' : ''}>
+        ${(EMBED_MODE ? [] : USERS).map((u) => `<button class="ghost" data-login="${u.id}"
            title="${esc(u.hint)}">换成：${esc(u.name)}</button>`).join('')}
       </div>
     </div>`;
@@ -10296,11 +10325,221 @@ function fail(r) {
     <p class="note">HTTP ${r.status} · ${esc(r.body.error || '')}</p></div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Compatibility layout: section navigation and non-destructive table paging.
+// A section owns only top-level cards; cards nested in another card stay with it.
+// Business handlers and validation still belong to the existing page functions.
+// ---------------------------------------------------------------------------
+const TY_SECTION_SELECTION = new Map();
+const TY_PAGE_SELECTION = new Map();
+const TY_TABLE_LAYOUT = new WeakMap();
+let tySectionCards = [], tySectionTitles = [], tyLayoutScheduled = false;
+
+function tySetFlag(node, name, hidden) {
+  const value = hidden ? '1' : '0';
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+}
+
+function tyCardTitle(card, fallback) {
+  const heading = [...card.querySelectorAll('h2')].find(node => node.closest('.card') === card);
+  if (!heading) return fallback;
+  const label = heading.cloneNode(true);
+  label.querySelectorAll('.sub,.tag,.badge,button,select,input').forEach(n => n.remove());
+  return label.textContent.replace(/\s+/g, ' ').trim() || fallback;
+}
+
+function tyDecorateSections(view) {
+  const cards = [...view.querySelectorAll('.card')].filter(card =>
+    !card.parentElement.closest('.card') && !card.hidden && card.style.display !== 'none');
+  const titles = cards.map((card, i) => tyCardTitle(card, `内容 ${i + 1}`));
+  const same = cards.length === tySectionCards.length
+    && cards.every((card, i) => card === tySectionCards[i] && titles[i] === tySectionTitles[i]);
+  if (same) return;
+  tySectionCards = cards; tySectionTitles = titles;
+  view.querySelector(':scope > .ty-section-nav')?.remove();
+  if (cards.length < 2) {
+    cards.forEach(card => tySetFlag(card, 'data-ty-section-hidden', false));
+    return;
+  }
+  const nav = document.createElement('nav');
+  nav.className = 'ty-section-nav'; nav.setAttribute('aria-label', '本页内容分组');
+  const choices = [{ key: '*', title: '全部内容' }, ...cards.map((card, i) => ({
+    key: String(i), title: titles[i],
+  }))];
+  let selected = TY_SECTION_SELECTION.get(tab);
+  if (!choices.some(x => x.key === selected)) selected = '0';
+  const apply = () => {
+    cards.forEach((card, i) => tySetFlag(card, 'data-ty-section-hidden', selected !== '*' && selected !== String(i)));
+    nav.querySelectorAll('button').forEach(button =>
+      button.setAttribute('aria-pressed', String(button.dataset.section === selected)));
+    TY_SECTION_SELECTION.set(tab, selected);
+  };
+  for (const choice of choices) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.dataset.section = choice.key;
+    button.textContent = choice.title; button.title = choice.title;
+    button.onclick = () => { selected = choice.key; apply(); };
+    nav.appendChild(button);
+  }
+  view.prepend(nav); apply();
+}
+
+function tyDecorateTable(table, index) {
+  // A row-spanning body is one compound record; leave that special layout intact.
+  // The existing day/shift matrix uses column headers, so normal roster tables page.
+  const rows = [...table.tBodies].flatMap(body => [...body.rows]);
+  if (rows.some(row => [...row.cells].some(cell => cell.rowSpan > 1))) return;
+  const isSummary = row => /^(?:合计|合計|总计|總計|小计|小計|汇总|彙總|汇總)(?:\s|[:：（(]|$)/
+    .test((row.cells[0]?.textContent || '').trim());
+  const isGroup = row => !isSummary(row) && row.cells.length === 1 && row.cells[0].colSpan > 1;
+  const records = rows.filter(row => row.cells.length && !isSummary(row) && !isGroup(row)
+    && ![...row.cells].every(cell => cell.tagName === 'TH') && !row.hidden && row.style.display !== 'none');
+  let state = TY_TABLE_LAYOUT.get(table);
+  const sameRows = state && rows.length === state.rows.length && rows.every((row, i) => row === state.rows[i]);
+  if (!state && records.length <= 20) return;
+  if (!sameRows) {
+    if (state) state.controls.remove();
+    const card = table.closest('.card');
+    const key = `${tab}:${index}:${card ? tyCardTitle(card, '') : ''}`;
+    const saved = TY_PAGE_SELECTION.get(key) || { page: 1, size: 20 };
+    const controls = document.createElement('div'); controls.className = 'ty-page-controls';
+    controls.setAttribute('aria-label', '表格分页');
+    controls.innerHTML = `<span data-pager-count aria-live="polite"></span>
+      <button type="button" data-pager-action="prev">上一页</button>
+      <span data-pager-numbers></span>
+      <button type="button" data-pager-action="next">下一页</button>
+      <label>每页 <select aria-label="每页条数"><option value="20">20</option>
+        <option value="50">50</option><option value="100">100</option></select> 条</label>
+      <span class="ty-page-summary-note" data-pager-note></span>`;
+    table.insertAdjacentElement('afterend', controls);
+    state = { rows, controls, key, page: saved.page, size: saved.size };
+    TY_TABLE_LAYOUT.set(table, state);
+    controls.querySelector('select').value = String(state.size);
+    controls.querySelector('select').onchange = event => {
+      const first = (state.page - 1) * state.size;
+      state.size = Number(event.target.value); state.page = Math.floor(first / state.size) + 1;
+      tyDecorateTable(table, index);
+    };
+    controls.querySelector('[data-pager-action="prev"]').onclick = () => { state.page--; tyDecorateTable(table, index); };
+    controls.querySelector('[data-pager-action="next"]').onclick = () => { state.page++; tyDecorateTable(table, index); };
+  }
+  const pages = Math.max(1, Math.ceil(records.length / state.size));
+  state.page = Math.min(Math.max(1, state.page), pages);
+  const start = (state.page - 1) * state.size;
+  const visible = new Set(records.slice(start, start + state.size));
+  const recordSet = new Set(records);
+  let group = null;
+  const groupOfRow = new Map(), visibleGroups = new Set();
+  for (const row of rows) {
+    if (isGroup(row)) group = row;
+    groupOfRow.set(row, group);
+    if (visible.has(row) && group) visibleGroups.add(group);
+  }
+  for (const row of rows) {
+    let hidden = false;
+    if (recordSet.has(row)) hidden = !visible.has(row);
+    else if (isGroup(row)) hidden = !visibleGroups.has(row);
+    else if (isSummary(row) && /^(?:小计|小計)(?:\s|[:：（(]|$)/.test((row.cells[0]?.textContent || '').trim())) {
+      const owner = groupOfRow.get(row);
+      hidden = !!owner && !visibleGroups.has(owner);
+    }
+    tySetFlag(row, 'data-ty-page-hidden', hidden);
+  }
+  // Payroll has an explanatory row list below its table; keep it on the same page.
+  const notes = state.controls.nextElementSibling;
+  if (notes?.hasAttribute('data-ty-page-annotations')) {
+    [...notes.children].forEach((note, i) => tySetFlag(note, 'data-ty-page-hidden', i < start || i >= start + state.size));
+  }
+  const text = `共 ${records.length} 条 · 第 ${state.page} / ${pages} 页 · 显示 ${records.length ? start + 1 : 0}–${Math.min(start + state.size, records.length)} 条`;
+  const count = state.controls.querySelector('[data-pager-count]');
+  if (count.textContent !== text) count.textContent = text;
+  state.controls.querySelector('[data-pager-action="prev"]').disabled = state.page <= 1;
+  state.controls.querySelector('[data-pager-action="next"]').disabled = state.page >= pages;
+  const summaryNote = state.controls.querySelector('[data-pager-note]');
+  const noteText = rows.some(isSummary) || table.tFoot
+    ? '分页只改变明细显示，合计沿用原表完整口径，不是本页小计。'
+    : '分页只改变显示，已勾选的数据和已填写内容跨页保留。';
+  if (summaryNote.textContent !== noteText) summaryNote.textContent = noteText;
+  const numbers = state.controls.querySelector('[data-pager-numbers]');
+  const pageNumbers = [...new Set([1, state.page - 1, state.page, state.page + 1, pages])]
+    .filter(n => n > 0 && n <= pages).sort((a, b) => a - b);
+  const signature = `${state.page}/${pages}/${pageNumbers.join(',')}`;
+  if (numbers.dataset.signature !== signature) {
+    numbers.dataset.signature = signature; numbers.replaceChildren();
+    pageNumbers.forEach((page, i) => {
+      if (i && page > pageNumbers[i - 1] + 1) numbers.appendChild(document.createTextNode(' … '));
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = String(page);
+      button.setAttribute('aria-label', `第 ${page} 页`);
+      if (page === state.page) button.setAttribute('aria-current', 'page');
+      button.onclick = () => { state.page = page; tyDecorateTable(table, index); };
+      numbers.appendChild(button);
+    });
+  }
+  TY_PAGE_SELECTION.set(state.key, { page: state.page, size: state.size });
+}
+
+function tyEnhanceView() {
+  const view = document.getElementById('view');
+  if (!view) return;
+  tyDecorateSections(view);
+  [...view.querySelectorAll('table')].forEach(tyDecorateTable);
+}
+const tyViewObserver = new MutationObserver(() => {
+  if (tyLayoutScheduled) return;
+  tyLayoutScheduled = true;
+  queueMicrotask(() => { tyLayoutScheduled = false; tyEnhanceView(); });
+});
+tyViewObserver.observe(document.getElementById('view'), { childList: true, subtree: true });
+
+function renderEmbeddedSessionMessage(message) {
+  token = null; ME = null;
+  document.getElementById('view').innerHTML = `<div class="card"><h2>工作台会话</h2><p class="note">${esc(message)}</p></div>`;
+}
+
+// Identity remains in memory. No token is accepted from query strings or storage.
+// A parent context is informational until these legacy services use the new master data.
+let tySessionSequence = 0;
+async function tyReceiveWorkbenchMessage(event) {
+  if (!EMBED_MODE || event.origin !== location.origin || event.source !== window.parent) return;
+  const message = event.data;
+  if (!message || typeof message !== 'object') return;
+  if (message.type === 'tyhr:context' || message.type === 'tyhr:mastercontext') {
+    const context = message.context || {};
+    const labels = ['ledgerName', 'brandName', 'companyName', 'period']
+      .map(key => typeof context[key] === 'string' ? context[key].slice(0, 100) : '').filter(Boolean);
+    let note = document.querySelector('.ty-context-note');
+    if (!note) { note = document.createElement('div'); note.className = 'ty-context-note'; document.querySelector('main').prepend(note); }
+    note.textContent = (labels.length ? `工作台选择：${labels.join(' / ')}。` : '')
+      + '此处沿用兼容业务区原有数据范围，尚未按新门店公司自动筛选。';
+    return;
+  }
+  if (message.type !== 'tyhr:session' || typeof message.token !== 'string' || !message.token || message.token.length > 4096) return;
+  const sequence = ++tySessionSequence;
+  token = message.token;
+  try {
+    const me = await call('/api/me');
+    if (sequence !== tySessionSequence) return;
+    if (me.status !== 200 || !me.body || !Number.isSafeInteger(Number(me.body.id)) || Number(me.body.id) <= 0) {
+      renderEmbeddedSessionMessage('工作台会话已失效，请回到工作台重新登录。');
+      window.parent.postMessage({ type: 'tyhr:auth-required' }, location.origin);
+      return;
+    }
+    ME = me.body; uid = Number(ME.id);
+    if (ME.today) TODAY = ME.today;
+    if (ME.tz) TZ = ME.tz;
+    render(); await load();
+    window.parent.postMessage({ type: 'tyhr:session-applied', tab }, location.origin);
+  } catch {
+    if (sequence === tySessionSequence) renderEmbeddedSessionMessage('暂时无法读取工作台会话，请稍后从工作台重试。');
+  }
+}
+window.addEventListener('message', tyReceiveWorkbenchMessage);
+
 // 身份也能进 URL（?as=5）：截图、贴链接时不用再描述"点第几个身份"
 const AS = Number(new URLSearchParams(location.search).get('as'));
 // ★ 真实帐套里账号不止演示那 5 个：`?u=13&pwd=demo1234` 直接以该账号登录。
 //   没有它就只能看 1..5 号，而"演示帐套 31 个人各自的视角"正是要验的东西。
-{
+if (!EMBED_MODE) {
   const q = new URLSearchParams(location.search);
   const qu = Number(q.get('u') || 0);
   if (Number.isInteger(qu) && qu > 0) login(qu, q.get('pwd') || null);
@@ -10311,6 +10550,10 @@ const AS = Number(new URLSearchParams(location.search).get('as'));
   // 1 号（系统管理员）与 2 号（帐套管理员）没有「审批」读权限，首页两块是「—」——
   // 那不是坏了，但第一次打开就看到两个破折号，会被当成没做好。
   else login(USERS.some(u => u.id === AS) ? AS : 4, q.get('pwd') || null);
+} else {
+  renderEmbeddedSessionMessage(window.parent === window
+    ? '请从天意工作台打开兼容业务页面。' : '正在等待工作台登录会话…');
+  if (window.parent !== window) window.parent.postMessage({ type: 'tyhr:ready' }, location.origin);
 }
 </script>
 </body>

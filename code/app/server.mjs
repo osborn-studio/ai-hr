@@ -15,13 +15,14 @@
 //   · 没有 HTTP 框架 —— 用 node:http，减少依赖面，便于审阅
 // ============================================================================
 import { createServer } from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { withTx, createDb } from './db.mjs';
+import * as foundationBridge from './services/foundation-bridge.mjs';
 import { toHttp, bizErr } from './errors.mjs';
 import * as leave from './services/leave.mjs';
 import * as attendance from './services/attendance.mjs';
@@ -96,6 +97,13 @@ import { htmlToPdf } from './pdf.mjs';
 //   同名会让模块引用在 handler 作用域里被 TDZ 覆盖，报 "Cannot access 'auth' before initialization" ——
 //   而它看起来像导入顺序问题，实际是变量遮蔽。
 import * as authn from './services/auth.mjs';
+import * as foundation from './services/foundation.mjs';
+import * as foundationImporter from './services/foundation-import.mjs';
+import { rosterTemplate } from './services/foundation-import-template.mjs';
+import * as testWorkspace from './services/test-workspace.mjs';
+import * as hkTools from './services/hk-tools.mjs';
+import * as customerPayroll from './services/customer-payroll.mjs';
+import * as customerPerformance from './services/customer-performance.mjs';
 import { prepareRead, requireOrg, requireSession } from './services/guard.mjs';
 import { createLedgerRegistry } from './registry.mjs';
 
@@ -122,8 +130,8 @@ const MIGRATIONS = readdirSync(DB).filter((f) => /^\d{3}_.*\.sql$/.test(f)).sort
 // 三个现象都不指向"迁移"，所以每次都要有人从头查一遍。
 //
 // ★ 为什么**只检测、不自动跑**（刻意如此，别顺手改成自动）：
-//   PGlite 数据目录这条路**从来没有 schema_migration 账本**
-//   （tools/migrate.mjs 只服务 DATABASE_URL）。对存量库，"追平"只能靠猜
+//   旧版本的 PGlite 数据目录没有 schema_migration 账本。
+//   新空库会逐文件记录SHA256；对没有可信账本的存量库，不能猜
 //   "它停在哪个版本"；一旦猜成"db/ 里全部已应用"，一个缺 174/178/179 的旧库
 //   就会被**永久钉成最新** —— 问题从"迁移没跑"升级成"**永远不知道它没跑**"。
 //   一句话：**一个错误的账本比没有账本更危险** —— 没有账本时人还会怀疑，
@@ -142,7 +150,7 @@ async function warnPendingMigrations(db) {
     if (!hasLedger) {
       // ★ "无法核对"不等于"没问题" —— 这种情况只能告诉人怎么自查。
       console.warn('⚠ 迁移无法核对：这个库没有 schema_migration 账本'
-        + `（PGlite 数据目录建库时没有记账；db/ 现有 ${MIGRATIONS.length} 个迁移）。`);
+        + `（旧版本建库未记账；db/ 现有 ${MIGRATIONS.length} 个迁移）。`);
       console.warn(`  最近三个：${MIGRATIONS.slice(-3).join(' ')}。`
         + '这个库是从旧版本用起来的 —— **重启不会自动追平**新迁移。');
       // ★ 给出可直接执行的下一步，而不是"手工 psql"这种在 PGlite 上根本做不到的话：
@@ -161,7 +169,7 @@ async function warnPendingMigrations(db) {
     const missing = MIGRATIONS.filter((f) => !applied.has(f));
     if (missing.length) {
       console.warn(`⚠ 迁移未应用：${brief(missing)} —— 这个库是从旧版本用起来的，`
-        + '重启不会自动追平；要么跑 tools/migrate.mjs，要么重灌');
+        + '重启不会自动追平；先备份，再用 tools/migrate-checked.mjs --only <编号,...> 显式前滚');
     }
   } catch (e) {
     // ★ 检测本身绝不许挡住启动：它只是提示，不是闸门。
@@ -219,8 +227,7 @@ export async function createApp() {
   };
 
   // 已存在迁移过的库不再重跑：迁移里有 CREATE TABLE，重跑会炸。
-  // 真实项目这里要一张 schema_migration 表；切片用"有没有 sys_perm_dim"判断，
-  // 而这个判断本身也要写出来 —— 隐式的"应该已经有了"是最难查的那类问题。
+  // 用核心表识别空库；仅空库建立迁移账本，不猜测存量库历史。
   const fresh = (await db.query(
     `SELECT count(*)::int n FROM pg_tables
       WHERE schemaname='public' AND tablename='sys_perm_dim'`)).rows[0].n === 0;
@@ -228,7 +235,22 @@ export async function createApp() {
   // ★ 迁移只在空库上跑。上了真 PG 之后，**迁移应该由部署步骤跑**，
   //   而不是每次起服务顺手建表 —— 多副本同时启动就会撞在一起。
   //   切片保留这个便利，但要写出来：它是便利，不是设计。
-  if (fresh) for (const m of MIGRATIONS) await db.exec(readFileSync(join(DB, m), 'utf8'));
+  if (fresh) {
+    // Only a genuinely empty database may establish a complete migration ledger.
+    // Never infer or adopt migration history for an existing customer database.
+    await db.exec(`CREATE TABLE schema_migration (
+      file varchar(128) PRIMARY KEY, sha256 char(64) NOT NULL,
+      applied_at timestamptz NOT NULL DEFAULT now(), note varchar(200))`);
+    for (const m of MIGRATIONS) {
+      const sql = readFileSync(join(DB, m), 'utf8');
+      // A single exec keeps BEGIN/schema/ledger/COMMIT on one connection.
+      // withTx requires app_init_session(), which early migrations create.
+      const hash = createHash('sha256').update(sql).digest('hex');
+      const fileLiteral = m.replaceAll("'", "''");
+      await db.exec(`BEGIN;\n${sql}\nINSERT INTO schema_migration(file,sha256,note)
+        VALUES('${fileLiteral}','${hash}','fresh database initialization');\nCOMMIT;`);
+    }
+  }
   // ★ 不是空库 → 只**检测**有没有该跑而没跑的迁移，打一行警告。
   //   为什么不自动跑，见 warnPendingMigrations 的注释：错误的账本比没有账本更危险。
   else await warnPendingMigrations(db);
@@ -582,6 +604,7 @@ export async function createApp() {
   //   nonce 换一次的价值：注入进页面的 <script> 标签没有当次 nonce 就不执行，
   //   而注入者拿不到下一次的 nonce。
   const SEC_HEADERS = {
+    'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'x-frame-options': 'DENY',
@@ -662,8 +685,11 @@ export async function createApp() {
   });
 
   // 读路径：也走事务，理由与写相同（临时表是会话的），只是不写日志。
-  const runRead = async (res, fn) => {
+  const runRead = async (res, fn, beforeSend = null) => {
     const out = await withTx(db, (tx) => fn(tx));
+    // Read-side audit runs in its own transaction after the read commits, but
+    // finishes before the HTTP response so clients can immediately inspect it.
+    if (beforeSend) await beforeSend(out);
     return json(res, 200, strip(out));
   };
 
@@ -790,6 +816,21 @@ export async function createApp() {
         }
       }
 
+      // New workspace entry; legacy root remains stable for existing integrations/tests.
+      if (req.method === 'GET' && ['/workspace','/workspace.html','/workspace.mjs','/workspace.css','/customer-workbench.mjs','/foundation-import-ui.mjs','/organization-view.mjs','/hk-tools-ui.mjs'].includes(url.pathname)) {
+        const file = url.pathname === '/workspace' ? 'workspace.html' : url.pathname.slice(1);
+        if (file.endsWith('.html')) {
+          const nonce = randomBytes(16).toString('base64');
+          const html = readFileSync(join(HERE,file),'utf8').replace(/<script\b/g,`<script nonce="${nonce}"`);
+          const headers = htmlHeaders(nonce);
+          headers['content-security-policy'] = headers['content-security-policy'].replace("style-src 'unsafe-inline'","style-src 'self' 'unsafe-inline'") + "; frame-src 'self'";
+          res.writeHead(200, {'content-type':'text/html; charset=utf-8',...headers});
+          return res.end(html);
+        }
+        res.writeHead(200,{'content-type':file.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8',...SEC_HEADERS});
+        return res.end(readFileSync(join(HERE,file),'utf8'));
+      }
+
       // 单页界面。静态、零构建、零依赖 —— 让"权限不同结果不同"能被看见。
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         // nonce 必须**每次请求新生成**：固定 nonce 等于没有 nonce（它会被读出来复用）
@@ -797,7 +838,12 @@ export async function createApp() {
         const html = uiHtml()
           .replace('<script>', `<script nonce="${nonce}">`)
           .replace('<style>', `<style nonce="${nonce}">`);
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...htmlHeaders(nonce) });
+        const headers = htmlHeaders(nonce);
+        if (url.searchParams.get('embed') === '1') {
+          headers['x-frame-options'] = 'SAMEORIGIN';
+          headers['content-security-policy'] = headers['content-security-policy'].replace("frame-ancestors 'none'","frame-ancestors 'self'");
+        }
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...headers });
         return res.end(html);
       }
 
@@ -965,6 +1011,134 @@ export async function createApp() {
         });
       }
 
+      if(url.pathname.startsWith('/api/hk-tools/')&&req.method==='POST'){
+        let input;try{input=JSON.parse((await readBody(req,1024*1024)).toString('utf8'));}
+        catch(e){if(e.code)throw e;throw bizErr('E_TY_ARGUMENT','请求内容不是有效JSON');}
+        const kind=url.pathname.slice('/api/hk-tools/'.length);
+        return await runWrite(res,{actor:uid,action:'hk_tools.calculate',subject:`company:${input.company_id}`,fn:tx=>hkTools.calculate(tx,{userId:uid,kind,input})});
+      }
+
+      if (url.pathname.startsWith('/api/customer-payroll/') || url.pathname.startsWith('/api/customer-performance/')) {
+        const pay=url.pathname.startsWith('/api/customer-payroll/');
+        const parts=url.pathname.slice((pay?'/api/customer-payroll/':'/api/customer-performance/').length).split('/').filter(Boolean);
+        const scope={userId:uid,groupId:url.searchParams.get('group_id'),ledgerId:url.searchParams.get('ledger_id'),companyId:url.searchParams.get('company_id')};
+        const args={...scope,batchId:parts[1],cycleId:parts[1]};
+        const sendFile=(out,type,filename)=>{
+          res.writeHead(200,{'content-type':type,...SEC_HEADERS,...(filename?{'content-disposition':contentDisposition(filename)}:{})});
+          return res.end(out);
+        };
+        if(req.method==='GET') {
+          if(pay&&parts[0]==='batches'&&parts.length===1)return await runRead(res,tx=>customerPayroll.listBatches(tx,scope));
+          if(pay&&parts[0]==='rules')return await runRead(res,tx=>customerPayroll.listRuleSets(tx,scope));
+          if(pay&&parts[0]==='rule-catalog')return await runRead(res,async tx=>{await customerPayroll.listRuleSets(tx,scope);return customerPayroll.ruleCatalog();});
+          if(pay&&parts[0]==='input-template.csv'){
+            await withTx(db,tx=>customerPayroll.listRuleSets(tx,scope));
+            return sendFile(customerPayroll.inputTemplate().csv,'text/csv; charset=utf-8','payroll-input-template.csv');
+          }
+          if(pay&&parts[0]==='input-template')return await runRead(res,async tx=>{await customerPayroll.listRuleSets(tx,scope);return customerPayroll.inputTemplate();});
+          if(pay&&parts[0]==='input-schema')return await runRead(res,async tx=>{await customerPayroll.listRuleSets(tx,scope);return customerPayroll.inputSchema();});
+          if(pay&&parts[0]==='batches'&&parts[2]==='report')return await runRead(res,tx=>customerPayroll.report(tx,args));
+          if(pay&&parts[0]==='batches'&&parts[2]==='export.csv')return sendFile(await withTx(db,tx=>customerPayroll.exportCsv(tx,args)),'text/csv; charset=utf-8',`payroll-${Number(parts[1])}.csv`);
+          if(pay&&parts[0]==='batches'&&parts[2]==='print.html'){
+            const html=await withTx(db,tx=>customerPayroll.printHtml(tx,args));
+            res.writeHead(200,{'content-type':'text/html; charset=utf-8',...SEC_HEADERS,
+              'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"});return res.end(html);
+          }
+          if(!pay&&parts[0]==='cycles'&&parts.length===1)return await runRead(res,tx=>customerPerformance.listCycles(tx,scope));
+          if(!pay&&parts[0]==='cycles'&&parts[2]==='report')return await runRead(res,tx=>customerPerformance.report(tx,args));
+          if(!pay&&parts[0]==='cycles'&&parts[2]==='payroll-candidates')return await runRead(res,tx=>customerPerformance.getPayrollCandidates(tx,args));
+          if(!pay&&parts[0]==='cycles'&&parts[2]==='export.csv'){
+            const out=await withTx(db,tx=>customerPerformance.exportReport(tx,args));return sendFile(out.content,'text/csv; charset=utf-8',out.filename);
+          }
+        }
+        if(['POST','PUT'].includes(req.method)) {
+          let input;
+          try{input=JSON.parse((await readBody(req,12*1024*1024)).toString('utf8'));}
+          catch(e){if(e.code)throw e;throw bizErr('E_TY_ARGUMENT','请求内容不是有效JSON');}
+          let fn=null;
+          if(pay) {
+            if(parts[0]==='import-preview'&&req.method==='POST')fn=tx=>customerPayroll.importPreview(tx,{userId:uid,input});
+            if(parts[0]==='batches'&&parts.length===1&&req.method==='POST')fn=tx=>customerPayroll.createBatch(tx,{userId:uid,input});
+            if(parts[0]==='rules'&&req.method==='POST')fn=tx=>customerPayroll.saveRuleSet(tx,{userId:uid,input});
+            if(parts[0]==='rows'&&parts[2]==='mapping'&&req.method==='PUT')fn=tx=>customerPayroll.mapRow(tx,{userId:uid,rowId:parts[1],input});
+            if(parts[0]==='rows'&&parts[2]==='inputs'&&req.method==='PUT')fn=tx=>customerPayroll.editRowInputs(tx,{userId:uid,rowId:parts[1],input});
+            if(parts[0]==='batches'&&parts[2]==='locale'&&req.method==='PUT')fn=tx=>customerPayroll.setBatchLocale(tx,{...args,input});
+            if(parts[0]==='batches'&&req.method==='POST') {
+              if(parts[2]==='validate')fn=tx=>customerPayroll.validateBatch(tx,args);
+              if(parts[2]==='confirm')fn=tx=>customerPayroll.confirmBatch(tx,args);
+              if(parts[2]==='calculate')fn=tx=>customerPayroll.calculateBatch(tx,{...args,input});
+              if(parts[2]==='performance')fn=tx=>customerPayroll.applyPerformanceCandidates(tx,{...args,input});
+            }
+          } else {
+            if(parts[0]==='cycles'&&parts.length===1&&req.method==='POST')fn=tx=>customerPerformance.createCycle(tx,{userId:uid,input});
+            if(parts[0]==='cycles'&&parts[2]==='scheme'&&req.method==='PUT')fn=tx=>customerPerformance.saveScheme(tx,{...args,input});
+            if(parts[0]==='cycles'&&parts[2]==='inputs'&&req.method==='PUT')fn=tx=>customerPerformance.saveInputs(tx,{...args,input});
+            if(parts[0]==='cycles'&&parts[2]==='locale'&&req.method==='PUT')fn=tx=>customerPerformance.setCycleLocale(tx,{...args,input});
+            if(parts[0]==='cycles'&&parts[2]==='import-preview'&&req.method==='POST')fn=tx=>customerPerformance.importPreview(tx,{...args,input});
+            if(parts[0]==='cycles'&&parts[2]==='calculate'&&req.method==='POST')fn=tx=>customerPerformance.calculate(tx,args);
+            if(parts[0]==='cycles'&&parts[2]==='confirm'&&req.method==='POST')fn=tx=>customerPerformance.confirm(tx,{...args,input});
+            if(parts[0]==='cycles'&&parts[2]==='payroll-candidates'&&req.method==='POST')fn=tx=>customerPerformance.getPayrollCandidates(tx,args);
+          }
+          if(fn)return await runWrite(res,{actor:uid,action:pay?'customer.payroll':'customer.performance',subject:`${parts[0]}:${parts[1]||'new'}`,fn});
+        }
+        return json(res,404,{error:'E_TY_NOT_FOUND',message:'业务入口不存在'});
+      }
+
+      if (url.pathname.startsWith('/api/foundation/')) {
+        const parts = url.pathname.slice('/api/foundation/'.length).split('/').filter(Boolean);
+        if(parts[0]==='test-seed'&&parts.length===1&&req.method==='POST'){
+          let input;try{input=JSON.parse((await readBody(req)).toString('utf8'));}
+          catch(e){if(e.code)throw e;throw bizErr('E_TY_ARGUMENT','请求内容不是有效JSON');}
+          return await runWrite(res,{actor:uid,action:'foundation.test_seed',subject:'fully_synthetic',
+            fn:tx=>testWorkspace.seed(tx,{userId:uid,input})});
+        }
+        if(parts[0]==='import'&&parts[1]==='template.xlsx'&&req.method==='GET'){
+          res.writeHead(200,{...XLSX_HEADERS,...SEC_HEADERS,'content-disposition':contentDisposition('roster-synthetic-template.xlsx')});return res.end(rosterTemplate());
+        }
+        if(parts[0]==='import'&&['preview','commit'].includes(parts[1])&&req.method==='POST'){
+          let input;try{input=JSON.parse((await readBody(req,5*1024*1024)).toString('utf8'));}
+          catch(e){if(e.code)throw e;throw bizErr('E_TY_ARGUMENT','请求内容不是有效JSON');}
+          return await runWrite(res,{actor:uid,action:`foundation.import_${parts[1]}`,subject:String(input.ledger_id),
+            fn:tx=>foundationImporter[parts[1]](tx,{userId:uid,input})});
+        }
+        if (parts[0] === 'bridge' && parts[1] === 'status' && req.method === 'GET') {
+          return await runRead(res, tx => foundationBridge.status(tx,{userId:uid,companyId:url.searchParams.get('company_id')}));
+        }
+        if (parts[0] === 'bridge' && ['preview','commit','entities'].includes(parts[1]) && req.method === 'POST') {
+          let input;
+          try { input=JSON.parse((await readBody(req,1024*1024)).toString('utf8')); }
+          catch(e) {if(e.code) throw e;throw bizErr('E_TY_ARGUMENT','请求内容不是有效JSON');}
+          if(parts[1]==='preview') return await runRead(res,tx=>foundationBridge.preview(tx,{userId:uid,input}));
+          if(parts[1]==='entities')return await runWrite(res,{actor:uid,action:'foundation.create_legal_entity',subject:String(input.company_id),
+            fn:tx=>foundationBridge.createLegalEntity(tx,{userId:uid,input})});
+          return await runWrite(res,{actor:uid,action:'foundation.bridge',subject:String(input.company_id),
+            fn:tx=>foundationBridge.commit(tx,{userId:uid,input})});
+        }
+        if (req.method === 'GET' && parts[0] === 'bootstrap') {
+          return await runRead(res, tx => foundation.bootstrap(tx, {userId:uid,
+            groupId:url.searchParams.get('group_id'),ledgerId:url.searchParams.get('ledger_id'),companyId:url.searchParams.get('company_id')}));
+        }
+        if (req.method === 'GET' && parts[0] === 'people' && parts[2] === 'timeline') {
+          return await runRead(res, tx => foundation.timeline(tx,{userId:uid,personId:parts[1]}));
+        }
+        if (req.method === 'POST' && parts[0] === 'demo-seed') {
+          return await runWrite(res,{actor:uid,action:'foundation.demo_seed',subject:'synthetic',fn:tx=>foundation.seedDemo(tx,{userId:uid})});
+        }
+        if (req.method === 'POST' && parts[2] === 'deactivate') {
+          return await runWrite(res,{actor:uid,action:'foundation.deactivate',subject:`${parts[0]}:${parts[1]}`,
+            fn:tx=>foundation.deactivate(tx,{userId:uid,collection:parts[0],id:parts[1]})});
+        }
+        if (req.method === 'POST' || req.method === 'PUT') {
+          if ((req.method === 'POST' && parts.length !== 1) || (req.method === 'PUT' && parts.length !== 2)) return json(res,404,{error:'E_TY_NOT_FOUND'});
+          let input;
+          try {input=JSON.parse((await readBody(req,1024*1024)).toString('utf8'));}
+          catch(e) {if(e.code) throw e; throw bizErr('E_TY_ARGUMENT','请求内容不是有效JSON');}
+          return await runWrite(res,{actor:uid,action:`foundation.${req.method==='POST'?'create':'update'}`,subject:`${parts[0]}:${parts[1]||'new'}`,
+            fn:tx=>foundation.save(tx,{userId:uid,collection:parts[0],id:parts[1]||null,input})});
+        }
+        return json(res,405,{error:'E_TY_METHOD',message:'不支持硬删除；请使用停用、结束日期或授权有效期'});
+      }
+
       // 心跳：失败不影响本次请求（它只是"最后活跃时间"这个附加信息）
       session.touch(db, auth)
         .catch((e) => console.error('[session-touch]', String(e.message).split('\n')[0]));
@@ -1032,8 +1206,7 @@ export async function createApp() {
           // scope 用 list，row_count 是这一次真实的返回行数。
           viewArg = { scope: 'list', persons: out.rows.map((x) => x.employee_id) };
           return out;
-        });
-        if (viewArg) await logPayslipView({ actor: uid, ip: reqIp(req), ...viewArg });
+        }, () => viewArg && logPayslipView({ actor: uid, ip: reqIp(req), ...viewArg }));
         return sent;
       }
 
@@ -1707,8 +1880,7 @@ export async function createApp() {
             payRunId: d.run?.id ?? null,
           };
           return d;
-        });
-        if (viewArg) await logPayslipView({ actor: uid, ip: reqIp(req), ...viewArg });
+        }, () => viewArg && logPayslipView({ actor: uid, ip: reqIp(req), ...viewArg }));
         return sent;
       }
 
@@ -2028,8 +2200,7 @@ export async function createApp() {
           const rows = await payroll.listSlips(tx, { userId: uid, runId });
           viewArg = { scope: 'list', persons: rows.map((x) => x.employee_id), payRunId: runId };
           return { rows };
-        });
-        if (viewArg) await logPayslipView({ actor: uid, ip: reqIp(req), ...viewArg });
+        }, () => viewArg && logPayslipView({ actor: uid, ip: reqIp(req), ...viewArg }));
         return sent;
       }
 
@@ -3881,8 +4052,7 @@ export async function createApp() {
             viewArg = { scope: 'single', subject: person, payslipId: slip.id, rowCount: 1 };
           }
           return out;
-        });
-        if (viewArg) await logPayslipView({ actor: uid, ip: reqIp(req), ...viewArg });
+        }, () => viewArg && logPayslipView({ actor: uid, ip: reqIp(req), ...viewArg }));
         return sent;
       }
 
@@ -4168,13 +4338,12 @@ export async function createApp() {
         const period = String(url.searchParams.get('period') || '');
         const base = url.searchParams.get('base') || null;
         const sent = await runRead(res, (tx) => payslipDiff.diff(tx, {
-          userId: uid, personId, period, base }));
+          userId: uid, personId, period, base }), () => logPayslipView({
+          actor: uid, scope: 'single', subject: personId, rowCount: 1, ip: reqIp(req),
+        }));
         // ★ 留痕（184）：环比看的是**同一个人两期**的逐项差异，subject 就是他本人。
         //   这里没有具体 payslip_id（函数只回差异行），所以 payslip_id 留 NULL，
         //   row_count=1 表示"看了一个人的一份工资条"。
-        await logPayslipView({
-          actor: uid, scope: 'single', subject: personId, rowCount: 1, ip: reqIp(req),
-        });
         return sent;
       }
 

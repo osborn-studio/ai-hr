@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {assignmentsAt,employmentAt} from '../app/organization-view.mjs';
+const data={people:[{id:1,person_number:'SYNTH001',full_name:'合成人员甲'}],employments:[{id:10,person_id:1,company_id:100,hire_date:'2026-01-01',leave_date:'2026-10-31',status:'ended'},{id:11,person_id:1,company_id:101,hire_date:'2026-11-01',leave_date:null,status:'active'}],assignments:[{id:20,employment_id:10,company_id:100,valid_from:'2026-01-01',valid_to:'2026-11-01',status:'ended',is_primary:true},{id:21,employment_id:11,company_id:101,valid_from:'2026-11-01',valid_to:null,status:'active',is_primary:true}]};
+let n=0;const check=(name,f)=>{f();n++;console.log('✓ '+name);};
+check('ended historical assignment is visible during its valid period',()=>assert.equal(assignmentsAt(data,'2026-10-30')[0].id,20));
+check('leave date is inclusive',()=>assert.equal(employmentAt(data.employments[0],'2026-10-31'),true));
+check('old assignment ends exclusively as new company starts',()=>assert.deepEqual(assignmentsAt(data,'2026-11-01').map(a=>a.id),[21]));
+check('cross-store history keeps the permanent person identity',()=>assert.equal(assignmentsAt(data,'2026-10-01')[0].person.person_number,assignmentsAt(data,'2026-11-16')[0].person.person_number));
+check('no employment is invented before hire date',()=>assert.equal(assignmentsAt(data,'2025-12-31').length,0));
+check('cancelled assignment is excluded',()=>assert.equal(assignmentsAt({...data,assignments:[{...data.assignments[1],status:'cancelled'}]},'2026-11-16').length,0));
+check('cancelled employment is excluded even if dates cover the day',()=>assert.equal(assignmentsAt({...data,employments:[{...data.employments[1],status:'cancelled'}]},'2026-11-16').length,0));
+check('impossible calendar date is rejected',()=>assert.throws(()=>assignmentsAt(data,'2026-02-30'),/有效日期/));
+console.log(`\n${n}/${n} organization date-view checks passed`);
