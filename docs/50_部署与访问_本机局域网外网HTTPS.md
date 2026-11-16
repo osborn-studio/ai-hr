@@ -18,7 +18,7 @@
 ## 1. 一条命令起服务
 
 ```bash
-cd ai-hr/code
+cd ty-hr/code
 PGLITE_DATA_DIR=/tmp/xxym-v5 PORT=8899 node app/server.mjs
 ```
 
@@ -115,8 +115,8 @@ demo.example.com {
 只是转发过去的一份壳 —— **同一件事不要放两份拷贝**，它们迟早变成两种说法。
 
 ```bash
-cd ~/ai-hr && sh deploy/macos/install.sh --dry-run   # 先看它要做什么（不碰 launchctl、不 kill、不复制）
-cd ~/ai-hr && sh deploy/macos/install.sh             # 再真装
+cd ~/ty-hr && sh deploy/macos/install.sh --dry-run   # 先看它要做什么（不碰 launchctl、不 kill、不复制）
+cd ~/ty-hr && sh deploy/macos/install.sh             # 再真装
 ```
 
 `--dry-run` 会检查：node 可执行、代码目录与 `node_modules`、数据目录可写、磁盘余量、

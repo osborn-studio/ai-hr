@@ -6,7 +6,7 @@
 #
 # 构建上下文是 code/ 目录：
 #     cd code && docker compose up --build
-#     # 或 docker build -t ai-hr:local code/ && docker run -p 8787:8787 -v aihr:/data ai-hr:local
+#     # 或 docker build -t ty-hr:local code/ && docker run -p 8787:8787 -v aihr:/data ty-hr:local
 #
 # 为什么数据库和 app 在同一个容器：
 #   PGlite 是 "PostgreSQL 编译成 WASM"，跑在 Node 进程里。它没有独立进程，

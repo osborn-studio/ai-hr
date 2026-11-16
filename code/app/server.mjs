@@ -20,7 +20,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { withTx, createDb } from './db.mjs';
 import { toHttp, bizErr } from './errors.mjs';
 import * as leave from './services/leave.mjs';
@@ -5893,7 +5893,7 @@ function provisionLedger({ code, name, period, admin, pwd }) {
 }
 
 // 直接用 node app/server.mjs 启动
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const { server } = await createApp();
   const port = Number(process.env.PORT || 8787);
   // ★ 默认只绑回环：绑 0.0.0.0 而没有 TLS/反代，等于把"能登录就能改工资"暴露到网络上。

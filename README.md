@@ -1,6 +1,6 @@
-# ai-hr
+# 天意人力资源系统（ty-hr）
 
-奥斯本工作室 AI + HR 方向项目。本目录是**完整可交接快照**：设计文档、可执行代码、验收断言三者在同一棵树里，任何人（含 codex）拿到即可运行。
+天意人力资源系统（英文名：`ty-hr`），原 GitHub 项目 `osborn-studio/ai-hr`。本目录是**完整可交接快照**：设计文档、可执行代码、验收断言三者在同一棵树里，任何人（含 codex）拿到即可运行。
 
 ---
 
@@ -80,7 +80,7 @@
 ## 二、一条命令
 
 ```bash
-cd ai-hr/code && npm install && npm test     # 609 库 + 305 接口 + 4 持久化 + 5 备份 + 9 契约（1 跳过）+ 40 界面 + 23 全生命周期 + 7 多门店多法人 + 21 权限矩阵 + 9 工资单打包 + 11 档口范围
+cd ty-hr/code && npm install && npm test     # 609 库 + 305 接口 + 4 持久化 + 5 备份 + 9 契约（1 跳过）+ 40 界面 + 23 全生命周期 + 7 多门店多法人 + 21 权限矩阵 + 9 工资单打包 + 11 档口范围
 SEED_SKIP=1 node tools/seed-chain.mjs         # 连锁餐饮演示帐套（10 店/20 人/5 外包/26 账号，在建）
 npm run test:db                              # 只跑数据库
 npm run test:api                             # 只跑接口
@@ -210,7 +210,7 @@ cd code && docker compose up --build        # http://127.0.0.1:8787  · 演示�
 ## 三、目录## 三、目录
 
 ```
-ai-hr/
+ty-hr/
 ├── README.md / AGENTS.md    设计叙述 / 接手契约（改代码前先读 AGENTS.md）
 ├── Dockerfile / compose.yaml 部署物（未在本机验证，见上文）
 ├── screenshots/             界面实拍（无客户端名，可直接给外部看）

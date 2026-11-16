@@ -12,7 +12,7 @@
 services:
   app:
     build: .
-    image: ai-hr:local
+    image: ty-hr:local
     ports:
       - "127.0.0.1:8787:8787"     # 只绑回环：默认不给公网
     environment:
