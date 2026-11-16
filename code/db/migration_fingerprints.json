@@ -1,0 +1,71 @@
+{
+  "_说明": "迁移指纹：一条迁移在**库里留下的可观察痕迹**。tools/migrate-status.mjs 只读它、只执行其中的 sql、绝不应用迁移。每个 sql 必须只返回一行、一个 boolean：true=有迹象，false=无迹象，零行=对象不存在（也算无迹象）。为什么先只覆盖 5 条：这 5 条是今晚实际出过事故的那一批（172 档口三表、174 全店一次算、178 直属口径、179 强制自定义计划、180 工资条只看自己），而给 180 个迁移逐个写指纹要理解 180 份迁移的语义，写错的指纹比没有指纹更危险 —— 它会让人以为某条迁移确认生效了。其余 175 条一律输出「无法判定」，这是诚实的答案，不是待办。新增一条指纹的前提是：能一句话说清「这条迁移一定留下了什么，且后续迁移不会抹掉它」。",
+  "172": {
+    "判据": "station / store_station / station_position 三表齐全，且 fn_station_fill、fn_sp_set 存在",
+    "sql": "SELECT to_regclass('public.station') IS NOT NULL AND to_regclass('public.store_station') IS NOT NULL AND to_regclass('public.station_position') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_station_fill') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_sp_set') AS ok"
+  },
+  "174": {
+    "判据": "fn_station_fill_core 与 fn_station_fill_all 存在（批量版；172 只有单店版）",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_station_fill_core') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_station_fill_all') AS ok"
+  },
+  "178": {
+    "判据": "fn_hc_hireable 的正文里含 a.org_id = p_org（直属口径；旧实现走子树 path LIKE）",
+    "sql": "SELECT position('a.org_id = p_org' in p.prosrc) > 0 AS ok FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_hc_hireable'"
+  },
+  "179": {
+    "判据": "app_init_session 的正文里含 force_custom_plan",
+    "sql": "SELECT position('force_custom_plan' in p.prosrc) > 0 AS ok FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'app_init_session'"
+  },
+  "180": {
+    "判据": "资源码 payroll_slips_read_all 在 sys_perm_resource 里，且 fn_my_person 存在",
+    "sql": "SELECT EXISTS (SELECT 1 FROM public.sys_perm_resource r WHERE r.resource_code = 'payroll_slips_read_all') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_my_person') AS ok"
+  },
+  "181": {
+    "判据": "沿用函数 fn_station_quota_effective 存在（两个重载都算）",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_station_quota_effective') AS ok"
+  },
+  "182": {
+    "判据": "档口维度函数 fn_station_scope 与 fn_scope_people_station 都存在（只建了其中一个说明 182 跑了一半）",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_station_scope') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_scope_people_station') AS ok"
+  },
+  "183": {
+    "判据": "沿用函数 fn_hc_quota_effective 存在，且 fn_hc_quota 的正文引用了它（只建前者说明改了一半）",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_hc_quota_effective') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'fn_hc_quota' AND position('fn_hc_quota_effective' in p.prosrc) > 0) AS ok"
+  },
+  "184": {
+    "判据": "表 payslip_view_log 存在，且带 ck_pvl_scope 约束与三个索引（缺其中任何一个说明 184 只跑了一半）",
+    "sql": "SELECT to_regclass('public.payslip_view_log') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conname = 'ck_pvl_scope' AND c.conrelid = 'public.payslip_view_log'::regclass) AND (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'payslip_view_log' AND indexname IN ('ix_pvl_subject_at','ix_pvl_actor_at','ix_pvl_run')) = 3 AS ok"
+  },
+  "185": {
+    "判据": "留痕 append-only 触发器与归档函数都在（只建触发器＝归档会永久失败；只建函数＝证据可被改）",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relname='payslip_view_log' AND t.tgname='trg_pvl_append_only' AND NOT t.tgisinternal) AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname='fn_pvl_archive') AS ok"
+  },
+  "186": {
+    "判据": "签收表与 append-only 触发器都在，且 v_payslip_ack_progress 视图存在",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_class c WHERE c.relname='payslip_ack' AND c.relkind='r') AND EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relname='payslip_ack' AND t.tgname='trg_ack_append_only' AND NOT t.tgisinternal) AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relname='v_payslip_ack_progress' AND c.relkind='v') AS ok"
+  },
+  "190": {
+    "判据": "花名册扩列三列（english_name / job_title / hourly_rate）都在，且 fn_leave_available_at 存在",
+    "sql": "SELECT (SELECT count(*)=3 FROM information_schema.columns WHERE table_schema='public' AND ((table_name='person' AND column_name IN ('english_name','job_title')) OR (table_name='employment' AND column_name='hourly_rate'))) AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname='fn_leave_available_at') AS ok"
+  },
+  "191": {
+    "判据": "证照表与 90 天到期函数都在",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_class c WHERE c.relname='person_document' AND c.relkind='r') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname='fn_documents_expiring') AS ok"
+  },
+  "192": {
+    "判据": "MPF 表与缺失清单函数都在",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_class c WHERE c.relname='mpf_account' AND c.relkind='r') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname='fn_mpf_missing') AS ok"
+  },
+  "187": {
+    "判据": "撤回表在，且有效签收视图 v_payslip_ack_effective 存在（只建表不建视图＝查的人还会把撤回算成已签）",
+    "sql": "SELECT EXISTS (SELECT 1 FROM pg_class c WHERE c.relname='payslip_ack_revoke' AND c.relkind='r') AND EXISTS (SELECT 1 FROM pg_class c WHERE c.relname='v_payslip_ack_effective' AND c.relkind='v') AS ok"
+  },
+  "188": {
+    "判据": "requisition 有 position_id 列，且 fn_hc_gap_to_requisition 存在",
+    "sql": "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='requisition' AND column_name='position_id') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname='fn_hc_gap_to_requisition') AS ok"
+  },
+  "189": {
+    "判据": "outsourced_assignment 有 store_station_id，且 fn_station_outsourced 存在",
+    "sql": "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='outsourced_assignment' AND column_name='store_station_id') AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname='fn_station_outsourced') AS ok"
+  }
+}

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ai-hr 演示服务保活（macOS launchd）· 模板
+  ---------------------------------------------------------------------------
+  ★ 这是**模板**，不要直接 cp 到 ~/Library/LaunchAgents 用。
+    用同目录的 install.sh：它会把下面的三处 __…__ 占位符换成这台机器的实际值，
+    并顺手做四项验收（装 / 停 / 崩溃自拉 / 重启自启）。
+
+  install.sh 会改的三处（其余照抄）：
+    __NODE__   node 的可执行文件绝对路径
+               本机实测：/Users/linxinlan/.workbuddy/binaries/node/versions/22.22.2-6/bin/node
+               这个路径**带版本号**，WorkBuddy 升级 node 后就失效 —— install.sh 每次
+               从 ~/.workbuddy/binaries/node/versions/current 重新算，所以升级后重跑一次即可。
+               （原版写 /usr/local/bin/node：本机没有这个文件 → launchd exec 失败，
+                 配 KeepAlive 每 10 秒崩一次，服务永远起不来。）
+    __DATA__   数据目录的绝对路径
+               本机：~/Library/Application Support/aihr-demo/data
+               为什么不写 /tmp：/tmp 是指向 /private/tmp 的符号链接，macOS 重启会清空。
+               原来 PGLITE_DATA_DIR=/tmp/xxym-v4 + SEED_SKIP=1 的组合，重启后拉起的是一个
+               **空库**（没有用户、登不进去）—— 恰好让 launchd 唯一的价值（重启自启）失效。
+    __HOST__   监听地址，默认 0.0.0.0
+               0.0.0.0 = 局域网同事可以直接访问 http://<本机IP>:8899（docs/50 §3）
+               127.0.0.1 = 只有本机能访问，对外一律走反向代理（docs/50 §4）
+               ★ 这两者不是"哪个更安全"的问题，是"谁来终结 TLS"的问题：
+                 0.0.0.0 且没有反代时，局域网里是**明文 HTTP**，口令和 token 能被抓包。
+                 演示可以，别的场景不行。
+
+  日志：__LOGS__/aihr-8899.log（旧版在 /tmp，重启后历史日志丢了 —— 排障无据）
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aihr.demo</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>app/server.mjs</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__CODE__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- 已有库必须带 SEED_SKIP=1：不带的话 server.mjs 会认为要灌种子 -->
+    <key>SEED_SKIP</key>
+    <string>1</string>
+    <key>PGLITE_DATA_DIR</key>
+    <string>__DATA__</string>
+    <key>PORT</key>
+    <string>8899</string>
+    <key>HOST</key>
+    <string>__HOST__</string>
+    <!-- 在反向代理后面才设 1（否则限流会把所有请求算在代理那一个 IP 上，见 docs/50 §4） -->
+    <key>TRUST_PROXY</key>
+    <string>0</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!--
+    退出就重拉，但**成功退出（code 0）不重拉**：
+    这样 `launchctl stop` 能真正停住，不会被 KeepAlive 立刻拉回来。
+    崩溃 / 被 SIGKILL 都算非成功退出 → 会被重拉，符合"崩溃自拉"的验收要求。
+    代价：若应用某次自己以 code 0 退出，服务就停着不起了。当前 server.mjs 不会主动退 0。
+  -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>__LOGS__/aihr-8899.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOGS__/aihr-8899.log</string>
+</dict>
+</plist>

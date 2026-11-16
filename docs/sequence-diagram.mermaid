@@ -1,0 +1,141 @@
+%% 连锁餐饮集团一体化人力资源平台 · MCP 写操作完整时序
+%% 对应文档 §5.1（网关/传输）、§5.2（规范）、§5.6（两阶段写 + elicitation + 审批）、§5.7（限流）、§5.8（审计）
+%% ADR 依据：A1（默认只听 127.0.0.1）A2（独立网关 + 无 MQ）A3（三元组服务端解析）A4（求值序）A5（幂等键）A6（无 approve_*）A7（独立日志 3 年）A8（60/min）
+
+sequenceDiagram
+    autonumber
+    actor U as 用户 HR/店长
+    participant AI as AI 客户端
+    participant BR as stdio-bridge 同机可选
+    participant NG as Nginx TLS
+    participant GW as mcp-gateway 独立容器
+    participant AUTH as 授权服务 OAuth2.1
+    participant SC as 权限引擎三轴
+    participant PS as PlanStore
+    participant QG as QuotaGuard
+    participant APP as 主应用 Application
+    participant ENG as 排班算薪引擎
+    participant APV as 审批服务
+    participant FM as FieldMasker
+    participant AUD as CallAuditor
+    participant DB as PostgreSQL
+    participant RS as Redis
+
+    %% ---------- 1. 授权（A3：AI 永远代表某人） ----------
+    U->>AI: 帮我把下周早班排好
+    AI->>AUTH: Authorization Code + PKCE (scope=schedule read board)
+    AUTH->>U: 授权页 客户端名 申请范围 有效期
+    U->>AUTH: 同意
+    AUTH-->>AI: access_token 30min + refresh_token 7d 轮换
+    Note over AI,AUTH: token 含 sub 用户 + client_id + scope，不含任何角色声明<br/>三元组 = client_id + user_id + scope，角色由服务端实时解析
+
+    %% ---------- 2. 传输与限流（A1/A2/A8） ----------
+    alt 同机客户端
+        AI->>BR: stdio JSON-RPC
+        BR->>GW: HTTP POST /mcp 127.0.0.1 桥读本地 client_token
+    else 内网客户端 须显式开启监听
+        AI->>NG: HTTP POST /mcp Streamable HTTP
+        NG->>GW: 反代
+    end
+
+    GW->>QG: tryAcquire clientId userId tool
+    QG->>RS: 令牌桶 60 次每分钟 A8 与人类用户分开计数
+    QG-->>GW: 放行或超限
+    Note over GW,RS: 超限直接返回 E_RATE_LIMIT + retryAfterMs
+
+    %% ---------- 3. 三轴解析（A3/A4：数据→字段→功能） ----------
+    GW->>SC: 解析三元组
+    SC->>DB: 读 sys_user_role / sys_role_permission / sys_data_scope 每次请求实时算
+    SC->>RS: 缓存命中 key 带 permVersion
+    SC-->>GW: perms + dataScope STORE_SET 1024,1025 + fieldMask
+    Note over GW,SC: 求值序 数据范围 → 字段 → 功能 A4<br/>字段级只掩码 永不拒绝
+
+    %% ---------- 4. 自查与读 ----------
+    AI->>GW: tools/call meta_get_current_user
+    GW->>APP: GET /internal/v1/identity 服务间 token
+    APP-->>GW: 身份 + 有效数据范围
+    GW->>AUD: 写 mcp_call_log 读
+    GW-->>AI: 只能操作 1024/1025 两店，薪资字段掩码
+
+    AI->>GW: tools/call schedule_get_board storeId 1024 weekStart 2026-11-16
+    GW->>APP: /internal/v1/schedule/board
+    APP->>SC: beginScope userId clientId schedule
+    SC->>DB: SELECT app_begin_scope 灌入 tmp_scope_org 空则置 deny
+    APP->>DB: SELECT 加 JOIN tmp_scope_org 无可见组织则 AND 1=0 短路
+    APP-->>GW: board
+    GW->>FM: 序列化前掩码 MCP 掩码比 Web 更严
+    GW->>AUD: 写 mcp_call_log
+    GW-->>AI: board + summary + confirm_status + dataAsOf
+
+    %% ---------- 5. 阶段一：dry-run 生成 plan ----------
+    AI->>GW: tools/call schedule_batch_assign dryRun=true ops=320格 idempotency_key=K1
+    GW->>SC: 功能轴校验 schedule:write:assignment
+    GW->>APP: POST /internal/v1/schedule/preview
+    APP->>ENG: 内存校验 时间重叠 两级工时上限 健康证 资质
+    ENG->>DB: 读已发布排班区间 + 健康证 + 考勤组规则 + 法定上限
+    ENG-->>APP: diff 320 + conflicts 0 + affectedCount 320
+    APP-->>GW: preview
+    GW->>PS: 写 mcp_plan plan_id args_digest affectedCount 320 expires 加5分钟
+    GW->>AUD: 写 mcp_call_log dryRun + plan_id
+    GW-->>AI: planId + diff + requiresConfirmation true
+
+    %% ---------- 6. 二次确认 ----------
+    Note over GW,AI: 320 大于阈值 200 则 ConfirmGate 拦截
+    AI->>U: elicitation/create 将写入 320 个班次 是否继续
+    U->>AI: accept
+
+    %% ---------- 7. 阶段二：带 planId 执行（A5 幂等） ----------
+    AI->>GW: tools/call schedule_batch_assign planId=P1 idempotency_key=K1
+    GW->>PS: 校验 存在 未过期 未使用 tool 一致 args_digest 一致
+    PS-->>GW: valid
+    GW->>APP: POST /internal/v1/schedule/execute 30s 超时 超时可用 K1 重试
+    APP->>DB: BEGIN
+    APP->>DB: pg_advisory_xact_lock 1024 weekOrdinal 防并发
+    APP->>ENG: 事务内最终校验 同 dry-run 算法
+    ENG-->>APP: OK
+    APP->>DB: COPY tmp_assign_op FROM STDIN 320 行
+    APP->>DB: INSERT ON CONFLICT DO UPDATE schedule_assignment
+    APP->>DB: 标记受影响周未发布 重算受影响人日
+    APP->>APV: submit bizType SCHEDULE_CHANGE origin AI
+    Note over APV: A6 AI 只能 submit 不能 approve<br/>审批权不可委托给 AI 产品红线
+    APV->>DB: INSERT sys_approval_instance origin AI
+    APP->>DB: COMMIT
+    GW->>PS: plan 置 used=true
+
+    %% ---------- 8. 审计（A7） ----------
+    GW->>AUD: 写 mcp_call_log tool plan confirmation_mode affected_row_ids args_digest
+    AUD->>DB: INSERT mcp_call_log 按月分区 保留 3 年
+    GW-->>AI: ok + summary + meta affectedCount traceId planId
+
+    %% ---------- 9. 批处理必须异步（A2） ----------
+    Note over AI,DB: 若工具为批处理类 批量排班 批量算薪 大批导入 报表导出<br/>只做参数校验 创建 sys_job_instance 60s 内返回 jobId<br/>AI 轮询 gov_get_job_status 作业在业务层 Spring Batch 或线程池执行<br/>禁止同步等待
+
+    %% ---------- 10. 明文申请（受控） ----------
+    Note over AI,DB: gov_request_plaintext 不返回明文<br/>校验读权限 字段非 HIDDEN reason 至少 10 字<br/>一次性 ticket TTL 10min 返回受控 viewUrl Web 页面 水印加截屏审计<br/>审计 actor_type AI action REQUEST_PLAINTEXT
+
+    %% ---------- 11. 重算前置检查（封账） ----------
+    Note over AI,DB: 任何重算或重排请求先查 period_seal<br/>已封则返回 E_LOCKED_PERIOD + 已封至哪一天 + 应走哪条调整单<br/>硬校验 不能靠调用方自觉 也不让 Agent 自己判断
+
+    %% ---------- 12. 排班写入的用工口径硬约束（D10 建在正确的表上） ----------
+    Note over APP,DB: 执行阶段必须校验 snap_legal_employment_form <> 'SERVICE'<br/>承揽人员不排班，约束由 schedule_assignment 的 ck_sa_d10_service 兜底<br/>约束以 NOT VALID 上线，存量清零后 VALIDATE
+
+    %% ---------- 13. 工时生成的失败路径（无 unclassified 兜底） ----------
+    Note over ENG,DB: 类型段必须严格铺满 span（L1 结构式：逐段相接 + 首尾锚定，Σ 仅作量侧旁证）<br/>匹配不到规则 → 不产生段行 → 约束挂父行拒绝整批 → 人日卡在 raw 并落 segment_classify_failure<br/>绝不写一行 unclassified 静默归档，也绝不允许延长上一段凑数
+
+    %% ---------- 14. 下游消费的锁定口径 ----------
+    Note over APP,DB: 算薪取工时一律 WHERE confirm_status = 'locked'（不是 confirmed）<br/>confirmed 只表示能看，locked 才表示能算钱<br/>快照列（班段 13 列 = 12 个 snap_* + snap_utc_offset_minutes，逐列列名见 02g I8.4）重算时复制，不重新求值<br/>"单向"由 trg_daily_confirm_forward 强制；"必须过检查点"靠撤掉 app_role 对 confirm_status 的 UPDATE 权 + fn_daily_confirm() 单点
+
+    %% ---------- 15. 字段策略四出口统一（§6.0.5） ----------
+    Note over SC,FM: 字段档只能由 resolve_field_policy(principal, resource, field, scene) 产出<br/>scene 必填四值 list / detail / export / mcp，差异只收敛到这一个入参<br/>判定序：deny → 角色级 → 节点级取更严（∩ 不是覆盖）→ scene 收紧<br/>EXPORT：masked 一律降 hidden（除非有 data.export_unmasked）；MCP：editable 一律降 hidden<br/>收紧档写死在函数里不可配；导出器只接受 List&lt;Map&gt;（已过 masker），Entity 编译期传不进去
+
+    %% ---------- 16. 数据范围维度化（§6.0.3） ----------
+    Note over SC,DB: app_begin_scope 按 sys_perm_resource.row_gate_dims 逐维度灌 tmp_scope_org / tmp_scope_entity / tmp_scope_deny<br/>每个行闸维度在业务 SQL 里对应一个 EXISTS（/* dim:XXX */ + /* deny:XXX */，拦截器机检）<br/>维度无授予 = 空集 = 0 行；命中 sys_permission_deny = deny 且压过一切 allow<br/>考勤维度必须用 snap_attendance_org_id，不是 snap_org_id（后者是成本组织）<br/>人日行可见 ≠ 人日汇总值可见：汇总时长只能走 v_daily_metric_scoped（可见段求和）<br/>temporal_basis=FACT_SNAPSHOT 必传 fact_from；未登记资源抛 E_RESOURCE_UNREGISTERED
+
+    %% ---------- 17. 审批动作不可达（§6.0.6） ----------
+    Note over AI,APV: 101 个工具里 approve_* 为 0；权限配置类工具也为 0<br/>APV.approve 签名只收 ApproverCapable，ServiceAccountPrincipal 不实现它 → 编译期不可达<br/>AI 只能起草 / 预填 / 解释驳回，均不产生 sys_approval_task<br/>节点字段策略绝不开放为工具：那等于让 AI 修改越权规则本身
+
+    %% ---------- 18. 外部锚与断言运行层（§3.3.5 / §3.3.8 / §4.5） ----------
+    Note over ENG,DB: 五列时长是「两条方程、五个未知数」的封闭体系：chk_ads_sum + chk_ads_off 全绿而 span_hours 可为任意正数<br/>唯一的外部锚是 chk_ads_span（span_hours ≡ round(EPOCH(shift_end − shift_start)/3600, 2)），另有 chk_ads_nonneg 挡负分量<br/>段表求和（C2a/C2b/L3）虽是第二次独立测量，但它是视图、没有强制力 → 必须由 CHECK 承担<br/>清单每一项必须能被 to_regclass / to_regprocedure 解析，取不到即认为"它不是实现，是备注"
+    Note over ENG,DB: fallback 班段与它的补录单必须同事务：ctg_ads_fallback_same_txn（DEFERRABLE）用 xmin 判同事务<br/>分段写会得到"有工时无来源"的孤儿段，而 C2a/C2b/L3/L4 一条都不会红<br/>xmin 只用于写入时判定，禁止进事后巡检（VACUUM FREEZE 会改写它）
+    Note over AUD,DB: sys_check_registry.guards 四档：指向存在对象且 fixture_reject 仍被拒 / 为空（唯一防线，登记为债）/ 指向不存在（fail）/ 对象在但不再被拒（fail）<br/>第四档判据是行为不是文本：definition_hash 跨 PG 小版本会变 → 每次升级一片假红 → 报警被关掉<br/>fixture 必须贴边成对（内侧期望接受、外侧期望拒绝），距离 = 列类型 scale 派生，不由作者写死<br/>enabled 但从未 exercised 必须单独报数，不能并入"全部 pass"
+    Note over APP,DB: 记录型时间戳用 now()（同事务一致）；判定型用 clock_timestamp()（now() 是 transaction_timestamp 的别名，长事务里不前进）<br/>列级 REVOKE 必须先撤表级再授列级白名单；存在表级 GRANT UPDATE 时列级 REVOKE 完全无效

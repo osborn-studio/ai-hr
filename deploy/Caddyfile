@@ -1,0 +1,72 @@
+# ============================================================================
+# deploy/Caddyfile · 反代与 TLS（⚠️ 未在本机验证：本机没有域名与证书）
+# ----------------------------------------------------------------------------
+# 用法：
+#   1) 把一个域名解析到这台机器（下面用 ${DOMAIN}）
+#   2) docker run -d --name caddy -p 80:80 -p 443:443 \
+#        -e DOMAIN=hr.example.com \
+#        -v $PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro \
+#        -v caddy_data:/data -v caddy_config:/config \
+#        caddy:2
+#   3) app 仍然只听 127.0.0.1:8787（默认就是这样），由 Caddy 转进去
+#
+# 为什么必须有这一层（三条，都不是"最佳实践"式的泛泛而谈）：
+#   ① **TLS**：口令与工资条都在请求体里。明文 HTTP 上，登录一次就等于把口令
+#      交给链路上的每一跳。Caddy 默认自动申请并续期证书，不需要手工碰 PEM。
+#   ② **HOST 默认回环**：app 默认绑 127.0.0.1。要在容器里对外，得显式设
+#      HOST=0.0.0.0，而一旦设了，就必须有这一层挡在前面 —— 否则
+#      "能登录就能改工资"直接暴露在公网。
+#   ③ **HSTS**：应用层设不了（它只在 HTTPS 响应里有意义），必须由反代加。
+#
+# ★ 探针要放行：编排器/监控从内网探 /livez 与 /readyz，
+#   如果反代对它们也要求认证，健康检查会永远失败 —— 那就等于没有健康检查。
+# ============================================================================
+
+{
+	# 生产环境把邮箱写上，证书到期前会提醒
+	email {$ACME_EMAIL:ops@example.com}
+}
+
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	# ---- 探针：不记日志（每 30 秒一条会淹没真正的访问记录）----
+	@probe path /livez /readyz
+	handle @probe {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	# ---- 其余全部走应用 ----
+	handle {
+		reverse_proxy 127.0.0.1:8787 {
+			# 应用已经设了 CSP / nosniff / frame-options，
+			# 这里不重复设 —— 两处都设，改一处就会有两份不一致的头。
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	header {
+		# 只在 HTTPS 响应里有意义，所以必须在这一层加
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# 应用层已有，但对静态错误页（Caddy 自己生成的）也要有
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+	}
+}
+
+# ----------------------------------------------------------------------------
+# 还没做的两件事（写在这里，别当成已经做了）
+# ----------------------------------------------------------------------------
+# · 应用不知道自己在反代后面：它不读 X-Forwarded-For。现在没有"按 IP 限流"
+#   或"按 IP 记审计"，所以不影响；一旦加上，就必须先信任这个头 —— 而在
+#   不信任的情况下读它，等于让客户端自己填来源 IP。
+# · 没有 WAF / 没有请求体大小上限。Caddy 默认不限 body 大小；
+#   给一个上限（例如 `request_body { max_size 1MB }`）比事后查"为什么内存涨了"便宜。

@@ -1,0 +1,1356 @@
+%% 连锁餐饮集团一体化人力资源平台 · 核心领域模型与服务类关系
+%% 对应文档 §3 数据模型 / §4 关键引擎
+%% 说明：只画关键属性与方法，通用审计列（id/group_id/created_at/updated_at/version）已省略
+
+classDiagram
+    direction LR
+
+    %% ========== 组织域 ==========
+    class OrgUnit {
+        +Long id
+        +String code
+        +String name
+        +OrgType orgType
+        +Long parentId
+        +String path
+        +Short depth
+        +Long legalEntityId
+        +Long policySetId
+        +Long attendanceGroupId
+        +String costCenterCode
+        +LocalDate effectiveFrom
+        +LocalDate effectiveTo
+        +Long orgVersionId
+        +children() List~OrgUnit~
+        +subtreeIds() List~Long~
+        +assertBelongsToLegalEntity(Long) void
+    }
+
+    class OrgVersion {
+        +Long id
+        +Integer versionNo
+        +LocalDate effectiveDate
+        +VersionStatus status
+        +Long changeOrderId
+        +publish(Long userId) OrgVersion
+        +snapshot() void
+    }
+
+    class OrgChangeOrder {
+        +Long id
+        +Long fromParentId
+        +Long toParentId
+        +LocalDate effectiveDate
+        +OrderStatus status
+        +Long approvalId
+        +submit() void
+        +execute() void
+    }
+
+    class OrgHeadcount {
+        +Long orgUnitId
+        +String periodMonth
+        +Integer headcountApproved
+        +BigDecimal headcountBudgetAmount
+        +gap(int filled) int
+    }
+
+    class AttendanceGroup {
+        +Long id
+        +String code
+        +Long orgUnitId
+        +String ruleJson
+        +LocalDate effectiveFrom
+        +LocalDate effectiveTo
+        +resolveRule(LocalDate) Rule
+    }
+
+    %% ========== 人员域 ==========
+    class Person {
+        +Long id
+        +String name
+        +String namePinyin
+        +String idCardNoEnc
+        +String idCardNoHash
+        +String mobileEnc
+        +String photoKey
+        +decryptIdCard() String
+    }
+
+    class Employment {
+        +Long id
+        +Long personId
+        +String employeeNo
+        +Long legalEntityPayrollId
+        +Long legalEntitySiId
+        +String siCity
+        +Long primaryOrgId
+        +Long primaryStoreId
+        +Long reportToId
+        +List~Long~ dottedLineIds
+        +OwnershipType ownershipType
+        +LegalEmploymentForm legalEmploymentForm
+        +EmploymentType employmentType
+        +PayMode payMode
+        +CostBearingPolicy costBearingPolicy
+        +OtPayBearer otPayBearer
+        +Long vendorId
+        +LocalDate hireDate
+        +LocalDate probationEndDate
+        +LocalDate regularizationDate
+        +LocalDate terminationDate
+        +EmploymentStatus status
+        +activeOn(LocalDate) boolean
+        +tenureMonths(LocalDate) int
+        +isCrossStoreOn(LocalDate) boolean
+        +statutoryHoursCap() HoursCap
+    }
+
+    class EmployeeOrgAssignment {
+        +Long employeeId
+        +Long primaryOrgId
+        +Long scheduleOrgId
+        +Long attendanceOrgId
+        +Long workLocationOrgId
+        +LocalDate effectiveDate
+        +LocalDate endDate
+        +Long sourceOrderId
+        +constraint EXCLUDE (employee_id, daterange)
+        +orgOn(LocalDate) OrgTriple
+    }
+
+    class EmployeeStoreAssignment {
+        +Long employeeId
+        +Long storeOrgId
+        +String roleInStore
+        +LocalDate effectiveDate
+        +LocalDate endDate
+        +Long sourceOrderId
+        +workplacesOn(LocalDate) List~Long~
+    }
+
+    class EmploymentSegment {
+        +Long employmentId
+        +Integer seq
+        +LocalDate startDate
+        +LocalDate endDate
+        +ChangeType changeType
+        +String fromJson
+        +String toJson
+    }
+
+    class Contract {
+        +Long id
+        +Long employmentId
+        +String contractNo
+        +ContractType contractType
+        +LocalDate startDate
+        +LocalDate endDate
+        +SignStatus signStatus
+        +String esignRef
+    }
+
+    class Certificate {
+        +Long id
+        +Long employmentId
+        +CertType certType
+        +LocalDate issueDate
+        +LocalDate expireDate
+        +String fileKey
+        +validOn(LocalDate) boolean
+    }
+
+    class HrChangeOrder {
+        +Long id
+        +ChangeOrderType orderType
+        +Long employmentId
+        +LocalDate effectiveDate
+        +String payload
+        +OrderStatus status
+        +Long approvalId
+        +Origin origin
+        +submit() void
+        +execute() void
+    }
+
+    %% ========== 工时域 ==========
+    class Shift {
+        +Long id
+        +String code
+        +ShiftScope scope
+        +Long storeId
+        +Long refShiftId
+        +LocalTime startTime
+        +LocalTime endTime
+        +Boolean crossDay
+        +Integer breakMinutes
+        +BigDecimal paidHours
+        +Integer versionNo
+        +snapshotJson() String
+    }
+
+    class SchedulePeriod {
+        +Long id
+        +Long storeId
+        +LocalDate weekStart
+        +PeriodStatus status
+        +Integer noticeDays
+        +publish(Long userId) void
+    }
+
+    class ScheduleAssignment {
+        +Long id
+        +Long employmentId
+        +LocalDate workDate
+        +Long shiftId
+        +Long storeId
+        +BigDecimal plannedHours
+        +Instant startTs
+        +Instant endTs
+        +AssignmentStatus status
+        +String shiftSnapshot
+        +Interval toInterval() Interval
+    }
+
+    class AttendancePunch {
+        +Long id
+        +Long deviceId
+        +String employeeExtId
+        +Long employeeId
+        +Long storeOrgId
+        +Instant punchAt
+        +Instant receivedAt
+        +PunchType punchType
+        +VerifyMode verifyMode
+        +String photoKey
+        +String rawPayload
+        +constraint appendOnly (REVOKE UPDATE DELETE)
+    }
+
+    class AttendanceDaily {
+        +Long employeeId
+        +LocalDate workDate
+        +Long primaryStoreId
+        +RecordOwner recordOwner
+        +String attendanceStatusCode
+        +Boolean isOffPlan
+        +String absenceReason
+        +BigDecimal workHours
+        +BigDecimal otWeekdayHours
+        +BigDecimal otRestdayHours
+        +BigDecimal otStatutoryHours
+        +BigDecimal otCompensatedHours
+        +BigDecimal statutoryWorkedDays
+        +BigDecimal attendanceDays
+        +BigDecimal payrollDays
+        +BigDecimal sickShortDays
+        +BigDecimal sickLongDays
+        +Boolean sickCrossMonthFlag
+        +VetoStatus allowanceVetoStatus
+        +AmountStatus allowanceAmountStatus
+        +String periodMonth
+        +ConfirmStatus confirmStatus
+        +String forceConfirmReason
+        +Instant forceConfirmedAt
+        +Long sealId
+        +constraint UNIQUE (employee_id, workDate)
+        +constraint recordOwner not GENERATED
+        +customerDays() int
+    }
+
+    class AttendanceDailyStore {
+        +Long attendanceDailyId
+        +Long employeeId
+        +Long storeOrgId
+        +Long storeId
+        +Instant shiftStartAt
+        +Instant shiftEndAt
+        +BigDecimal spanHours
+        +BigDecimal workHours
+        +BigDecimal breakOnDutyHours
+        +BigDecimal breakOffDutyHours
+        +BigDecimal inAttendanceHours
+        +Long assignmentId
+        +AssignmentType snapAssignmentType
+        +String snapAssignmentSource
+        +LocalDate businessDate
+        +Short snapUtcOffsetMinutes
+        +LocalDate workDate
+        +BigDecimal otWeekdayHours
+        +BigDecimal otRestdayHours
+        +BigDecimal otStatutoryHours
+        +BigDecimal snapUnitPrice
+        +String snapSkillCode
+        +Long snapOrgId
+        +Long snapPayrollLegalEntityId
+        +String snapBillingMode
+        +String snapEmploymentType
+        +String snapPayBasis
+        +Integer snapPayProfileVer
+        +Integer snapCalcRuleVersion
+        +String snapOwnershipType
+        +String snapLegalEmploymentForm
+        +constraint EXCLUDE (employee_id, tstzrange)
+        +constraint workDate plain col via trigger
+        +constraint FK (employeeId, workDate)
+        +constraint snap* FORBID GENERATED ALWAYS
+    }
+
+    class AttendanceDailyStoreSegment {
+        +Long dailyStoreId
+        +Short seq
+        +String hourTypeCode
+        +Instant segStartAt
+        +Instant segEndAt
+        +BigDecimal hours
+        +BigDecimal multiplier
+        +String sourceKind
+        +Long breakRuleId
+        +Integer breakRuleVersion
+        +Integer ruleDurationMinutes
+        +Integer breakTrimmedMinutes
+        +Boolean breakEditRevoked
+        +String snapAllowanceJson
+        +constraint hourType NO unclassified
+    }
+
+    class HourType {
+        +String code
+        +String label
+        +Boolean countsAsWork
+        +Boolean onDuty
+        +Boolean isOt
+        +BigDecimal otMultiplier
+        +Short sortOrder
+        +Boolean isActive
+        +Instant deactivatedAt
+        +constraint ot implies countsAsWork
+        +constraint not ot implies no multiplier
+        +constraint deactivate never delete
+    }
+
+    class AttendanceStatus {
+        +String code
+        +String label
+        +Boolean isWorkday
+        +Boolean countsAsAttend
+        +Short sortOrder
+    }
+
+    class AttendanceDailyStorePunch {
+        +Long dailyStoreId
+        +Long punchId
+        +String role
+        +constraint UNIQUE (punchId, role)
+        +constraint one first_in per store row
+    }
+
+    class AttendanceDailyRemoved {
+        +Long attendanceDailyId
+        +Long employeeId
+        +LocalDate workDate
+        +String snapshotJson
+        +String reason
+        +Long operatorId
+        +String origin
+    }
+
+    class ComplianceProfile {
+        +String code
+        +String worktimeSystem
+        +BigDecimal dailyOtCapHours
+        +BigDecimal weeklyHoursCap
+        +BigDecimal minRestHours
+        +Short maxConsecutiveDays
+        +Short strictnessRank
+        +String source
+    }
+
+    class EmployeeComplianceProfile {
+        +Long employmentId
+        +Long complianceProfileId
+        +String source
+        +String matchedBy
+        +LocalDate effectiveFrom
+        +LocalDate effectiveTo
+        +constraint source in matched/fb/manual
+    }
+
+    class AttendanceLeaveSlice {
+        +Long leaveRequestId
+        +Long employmentId
+        +Instant sliceStartAt
+        +Instant sliceEndAt
+        +BigDecimal hours
+        +LocalDate workDate
+        +constraint hours gt 0
+    }
+
+    class AttendanceLeaveConflict {
+        +Long employmentId
+        +LocalDate workDate
+        +String conflictType
+        +Long routedToOrgId
+        +String routedRole
+        +Instant slaDueAt
+        +String status
+    }
+
+    class AttendanceBreakSkipLog {
+        +Long dailyStoreId
+        +Long ruleId
+        +Integer ruleVersion
+        +String reasonCode
+        +String origin
+    }
+
+    class Vendor {
+        +Long id
+        +String name
+        +String recordOwnerPolicy
+        +String serviceScope
+    }
+
+    class ContractorPresence {
+        +Long vendorId
+        +Long storeOrgId
+        +String personName
+        +LocalDate presenceDate
+        +Instant checkInAt
+        +Instant checkOutAt
+        +BigDecimal headcount
+    }
+
+    class PeriodSeal {
+        +Long legalEntityId
+        +String period
+        +LocalDate sealedThroughDate
+        +Instant sealedAt
+        +Long operatorId
+        +isSealed(LocalDate) boolean
+    }
+
+    class AttendanceException {
+        +Long id
+        +Long employmentId
+        +LocalDate workDate
+        +ExceptionType exceptionType
+        +Severity severity
+        +HandleStatus handleStatus
+        +HandleType handleType
+        +handle(Long by, HandleType) void
+    }
+
+    %% ========== 假期域 ==========
+    class LeaveType {
+        +Long id
+        +String code
+        +Boolean isPaid
+        +LeaveUnit unit
+        +BigDecimal minUnit
+        +String quotaRuleJson
+        +CarryoverPolicy carryoverPolicy
+        +Short expireMonth
+        +isStatutory boolean
+    }
+
+    class LeaveQuotaLedger {
+        +Long employmentId
+        +Long leaveTypeId
+        +Short bizYear
+        +LedgerEntryType entryType
+        +QuotaState quotaState
+        +BigDecimal deltaDays
+        +Instant occurredAt
+        +Long refId
+        +Long operatorId
+        +append() void
+    }
+
+    class LeaveBalanceSnapshot {
+        +Long employmentId
+        +Long leaveTypeId
+        +Short bizYear
+        +BigDecimal entitledDays
+        +BigDecimal grantedDays
+        +BigDecimal borrowedDays
+        +BigDecimal carriedDays
+        +BigDecimal usedDays
+        +BigDecimal remainingDays
+        +rebuildFromLedger() void
+    }
+
+    class LeaveRequest {
+        +Long id
+        +Long employmentId
+        +Long leaveTypeId
+        +LocalDate startDate
+        +LocalDate endDate
+        +BigDecimal days
+        +RequestStatus status
+        +Long approvalId
+        +Long sickSeriesId
+        +submit() void
+    }
+
+    %% ========== 薪酬域 ==========
+    class PayScheme {
+        +Long id
+        +String code
+        +Long legalEntityId
+        +EmploymentType employmentType
+        +PayMode payMode
+        +BigDecimal payrollMonthlyStandardHours
+        +ProrationBasis prorationBasis
+        +String otRateJson
+        +CostBearingPolicy costBearingPolicy
+        +LocalDate effectiveFrom
+        +LocalDate effectiveTo
+    }
+
+    class PayItem {
+        +Long id
+        +String code
+        +ItemCategory category
+        +CalcType calcType
+        +String formula
+        +Boolean isTaxable
+        +Boolean isSiBase
+        +Boolean isCost
+        +String reportColumn
+        +Boolean statutoryItem
+    }
+
+    class PayrollPeriod {
+        +Long id
+        +String periodMonth
+        +Long legalEntityId
+        +PeriodStatus status
+        +Long currentRunId
+        +Integer employeeCount
+        +BigDecimal totalGross
+        +Boolean locked
+    }
+
+    class PayrollRecord {
+        +Long id
+        +String periodMonth
+        +Long employmentId
+        +Long legalEntityPayrollId
+        +Long costOrgId
+        +PayMode payMode
+        +BigDecimal grossAmount
+        +BigDecimal deductionAmount
+        +BigDecimal employerSiAmount
+        +BigDecimal netAmount
+        +BigDecimal siBase
+        +Long calcRunId
+        +Boolean isCurrent
+        +String snapshotJson
+    }
+
+    class PayrollRecordItem {
+        +Long recordId
+        +Long payItemId
+        +BigDecimal qty
+        +BigDecimal rate
+        +BigDecimal amount
+        +String formulaTrace
+    }
+
+    class PayrollCostAllocation {
+        +Long id
+        +Long recordId
+        +String periodMonth
+        +Long costOrgId
+        +BigDecimal allocDays
+        +BigDecimal allocHours
+        +BigDecimal allocAmount
+        +BigDecimal employerSiAmount
+        +AllocationBasis basis
+        +AllocRole allocRole
+        +BigDecimal externalPrice
+        +Boolean isBalancing
+        +identitySumEqualsS() void
+    }
+
+    class PayrollTransfer {
+        +Long id
+        +Long transferId
+        +String periodMonth
+        +Long employeeId
+        +Long fromCostOrg
+        +Long toCostOrg
+        +BigDecimal diffAmount
+        +BigDecimal transferDays
+        +BigDecimal transferHours
+        +Long sourceOrderId
+        +sumByTransferIsZero() void
+    }
+
+    class PayBatch {
+        +Long id
+        +Long payrollPeriodId
+        +String batchNo
+        +BatchType batchType
+        +LocalDate payDate
+        +BigDecimal totalAmount
+        +String bankFileKey
+        +BatchStatus status
+        +confirm(Long by) void
+    }
+
+    class BankPaymentLine {
+        +Long batchId
+        +Long recordId
+        +String accountNoEnc
+        +BigDecimal amount
+        +LineStatus status
+        +String failReason
+    }
+
+    class PayrollCalcRun {
+        +Long id
+        +Long payrollPeriodId
+        +String scopeHash
+        +String dataVersion
+        +RunStatus status
+        +Integer totalCount
+        +Integer successCount
+        +Integer errorCount
+    }
+
+    class SiPlan {
+        +Long id
+        +String city
+        +String planCode
+        +BigDecimal baseMin
+        +BigDecimal baseMax
+        +String itemsJson
+        +LocalDate effectiveFrom
+        +LocalDate effectiveTo
+    }
+
+    class TaxAccumulation {
+        +Long employmentId
+        +Short taxYear
+        +Short taxMonth
+        +BigDecimal cumulativeIncome
+        +BigDecimal cumulativeTax
+        +BigDecimal cumulativeTaxPaid
+    }
+
+    %% ========== 绩效域 ==========
+    class PerfUnit {
+        +Long id
+        +String code
+        +UnitType unitType
+        +Long orgUnitId
+        +Long costCenterId
+    }
+
+    class PerfIndicator {
+        +Long id
+        +String code
+        +String formula
+        +String dataSource
+        +Direction direction
+    }
+
+    class PerfTemplate {
+        +Long id
+        +String name
+        +CycleType cycleType
+        +String applicableJson
+        +Integer versionNo
+    }
+
+    class PerfCycle {
+        +Long id
+        +Long templateId
+        +LocalDate periodStart
+        +LocalDate periodEnd
+        +CycleStatus status
+        +Integer calibrationRound
+    }
+
+    class PerfResult {
+        +Long id
+        +Long cycleId
+        +Long employmentId
+        +Long perfUnitId
+        +BigDecimal totalScore
+        +String grade
+        +BigDecimal personalCoef
+        +BigDecimal unitCoef
+        +BigDecimal bonusAmount
+        +CoefRule coefRule
+    }
+
+    class PerfBonusPool {
+        +Long cycleId
+        +Long perfUnitId
+        +BigDecimal poolAmount
+        +String ruleJson
+    }
+
+    %% ========== 平台域：身份与三轴权限 ==========
+    class SysUser {
+        +Long id
+        +String username
+        +String passwordHash
+        +Long personId
+        +UserType userType
+        +UserStatus status
+        +Boolean mfaEnabled
+    }
+
+    class SysRole {
+        +Long id
+        +String code
+        +RoleType roleType
+        +Boolean isStaticSuper
+    }
+
+    class SysPermission {
+        +Long id
+        +String code
+        +PermType permType
+    }
+
+    class SysDataScope {
+        +Long id
+        +String name
+        +ScopeType scopeType
+        +String orgIdsJson_DEPRECATED
+        +String legalEntityIdsJson_DEPRECATED
+    }
+
+    class SysDataScopeRule {
+        +Long id
+        +Long dataScopeId
+        +Dimension dimension
+        +ScopeValueType valueType
+        +Long[] valueIds
+        +Combinator combinator
+        +assertShape() void
+    }
+
+    class SysPermissionDeny {
+        +Long roleId
+        +Dimension dimension
+        +Long[] valueIds
+        +String fieldPath
+        +String reason
+        +Instant revokedAt
+        +deniesRow() boolean
+    }
+
+    class SysFieldPermission {
+        +Long roleId
+        +String resource
+        +String fieldPath
+        +Scene scene
+        +FieldAction action
+        +Boolean isCeiling
+        +String reason
+    }
+
+    class SysNodeFieldPolicy {
+        +Long nodeId
+        +String resource
+        +String fieldPath
+        +FieldAction action
+        +RequiredStage requiredStage
+    }
+
+    class SysPermResource {
+        +String resourceCode
+        +List~DimensionCode~ rowGateDims
+        +TemporalBasis temporalBasis
+        +String factDateColumn
+        +String exportPermissionCode
+        +String defaultFieldPolicy
+    }
+
+    class SysUserRole {
+        +Long userId
+        +Long roleId
+        +Long dataScopeId
+        +GrantKind grantKind
+        +LocalDate validFrom
+        +LocalDate validTo
+        +Long supersededBy
+        +Boolean readonlyOnly
+        +Integer permVersion
+        +isExpired() boolean
+    }
+
+    class SysPermissionBundle {
+        +Long id
+        +String code
+        +String targetRoleKind
+        +Boolean isActive
+    }
+
+    class SysPermissionBundleItem {
+        +Long bundleId
+        +String permissionCode
+    }
+
+    class AccessDecisionLog {
+        +Long subjectId
+        +Long resourceId
+        +String action
+        +String decision
+        +Long[] matchedGrantIds
+        +Integer matchedCount
+        +String durability
+        +String traceId
+    }
+
+    class PermissionBundleExpander {
+        <<config-only>>
+        +expand(Long bundleId) List~String~
+    }
+
+    class MetricDefinition {
+        +String metricCode
+        +String formula
+        +String costInclusionJson
+        +String revenueCaliber
+        +String periodAlignment
+        +String dataSourceTables
+        +Long owner
+    }
+
+    %% ========== MCP 治理 ==========
+    class McpClient {
+        +Long id
+        +String clientId
+        +String clientName
+        +ClientType clientType
+        +Long bindUserId
+        +Long bindServiceAccountId
+        +String allowedScopes
+        +Integer qpsLimit
+        +Integer dailyQuota
+        +String maxDataScope
+        +ClientStatus status
+    }
+
+    class McpCallLog {
+        +Long id
+        +String traceId
+        +Long clientId
+        +Long userId
+        +String toolName
+        +String transport
+        +String argsDigest
+        +String argsMasked
+        +String planId
+        +String confirmationMode
+        +String dataScopeEffective
+        +String affectedRowIds
+        +Integer affectedCount
+        +String resultCode
+        +Integer durationMs
+    }
+
+    class McpPlan {
+        +String planId
+        +String toolName
+        +String argsDigest
+        +String diffJson
+        +Integer affectedCount
+        +Instant expiresAt
+        +Boolean used
+        +isValid(String tool, String digest) boolean
+    }
+
+    class SysAdjustmentOrder {
+        +Long id
+        +String bizDomain
+        +String targetType
+        +Long targetId
+        +String beforeJson
+        +String afterJson
+        +String reason
+        +OrderStatus status
+        +Origin origin
+        +revert(Long by) void
+    }
+
+    class SysAuditLog {
+        +Long id
+        +String traceId
+        +ActorType actorType
+        +Long actorUserId
+        +Long mcpClientId
+        +String action
+        +String resource
+        +Long resourceId
+        +String beforeJson
+        +String afterJson
+        +String prevHash
+        +String rowHash
+    }
+
+    class SysJobInstance {
+        +Long id
+        +String jobType
+        +String paramsJson
+        +JobStatus status
+        +BigDecimal progress
+        +Integer total
+        +Integer done
+        +Integer errorCount
+        +String resultRef
+    }
+
+    %% ========== 服务类（引擎与横切） ==========
+    class ScopeResolver {
+        <<service>>
+        +resolveScope(Long userId) MapOfLong
+        +mapScopeToPermissions(String tokenScope, Long userId) Set~String~
+        +effectiveDataScope(Long userId, Long clientId) DataScopeExpr
+        +beginScope(Long userId, String resource) void
+        +maskLevel(McpMinLevel, Long userId, String resource) MaskType
+    }
+
+    class FieldMasker {
+        <<service>>
+        +mask(Object dto, MaskContext ctx) Object
+        +maskField(String path, Object value, MaskType) Object
+        +scanSensitive(Object dto) List~String~
+    }
+
+    class FieldPolicyResolver {
+        <<service>>
+        +resolve(Principal p, String entity, String field, FieldContext ctx) FieldPolicy
+        -roleLevelPolicy(Principal, String, String) MaskType
+        -anyCeiling(Principal, String, String) boolean
+        -nodeLevelPolicy(Long nodeDefId, String, String) SysNodeFieldPolicy
+        -capByExit(FieldPolicy, ExitPoint) FieldPolicy
+    }
+
+    class FieldPolicy {
+        +Visibility v
+        +Editability e
+        +Requirement r
+        +String reasonCode
+        +isHidden() boolean
+    }
+
+    class FieldContext {
+        +ExitPoint exit
+        +Long nodeDefId
+        +String purposeCode
+        +String traceId
+    }
+
+    class Principal {
+        <<sealed interface>>
+        +Long principalId()
+        +ActorType actorType()
+    }
+
+    class NaturalPersonPrincipal {
+        +Long userId
+        +Long personId
+        +Set~String~ permissionCodes
+    }
+
+    class ServiceAccountPrincipal {
+        +Long clientId
+        +String scope
+    }
+
+    class ApproverCapable {
+        <<interface>>
+        +Long approverUserId()
+    }
+
+    class PayrollEngine {
+        <<service>>
+        +run(PayrollCalcRun run) void
+        +loadPopulation(Period, Long legalEntity) List~Long~
+        +freezeSnapshot(Period, List~Long~) void
+        +compileFormulaGraph(PayScheme) FormulaGraph
+        +calcShard(List~Long~, FormulaGraph) List~PayrollRecord~
+        +recalc(String periodMonth, List~Long~ empIds) PayrollCalcRun
+        +explainItem(Long recordId, String itemCode) FormulaTrace
+    }
+
+    class FormulaCompiler {
+        <<service>>
+        +compile(PayItem) AstNode
+        +validate(AstNode) ValidationResult
+        +buildGraph(List~PayItem~) FormulaGraph
+        +detectCycle(FormulaGraph) List~String~
+    }
+
+    class BalanceValidator {
+        <<service>>
+        +validate(String periodMonth, Long legalEntityId) List~Anomaly~
+        +sumByRecord(String periodMonth, Long legalEntityId) MapOfAmount
+    }
+
+    class AllocationService {
+        <<service>>
+        +allocate(String periodMonth, Long legalEntityId) void
+        +resolveBasis(Employment) AllocationBasis
+        +rebalance(Long recordId) void
+    }
+
+    class ScheduleValidator {
+        <<service>>
+        +validate(List~AssignOp~, ScheduleContext) ValidationResult
+        +detectOverlap(List~Interval~) List~Conflict~
+        +checkGroupCap(Employment, List~Interval~, AttendanceGroup) List~Conflict~
+        +checkDailyTotalAcrossStores(Long employmentId, LocalDate, BigDecimal) List~Conflict~
+        +checkCompliance(Employment, List~AssignOp~) List~Conflict~
+        +checkHealthCert(Long employmentId, LocalDate) List~Conflict~
+    }
+
+    class ScheduleBatchService {
+        <<service>>
+        +preview(List~AssignOp~, ScopeExpr) PreviewResult
+        +execute(McpPlan plan) BatchResult
+        +bulkUpsert(List~AssignOp~) void
+        +invalidateCache(Long storeId, LocalDate weekStart) void
+    }
+
+    class AttendanceRecalcService {
+        <<service>>
+        +recalcPersonDay(Long employeeId, LocalDate) void
+        +rebuildSegments(Long employeeId, LocalDate) void
+        +judgeOtByPersonDay(Long employeeId, LocalDate) void
+        +computeSickSeries(Long employeeId, String periodMonth) SickSeries
+        +assertNotSealed(Long employeeId, LocalDate) void
+    }
+
+    class PeriodSealService {
+        <<service>>
+        +seal(String period, LocalDate throughDate, Long operator) PeriodSeal
+        +isSealed(String period, LocalDate) boolean
+        +rejectIfSealed(String operation) void
+    }
+
+    class CostAllocationValidator {
+        <<service>>
+        +assertIdentity(Long recordId) void
+        +assertTransferSymmetry(Long transferId) void
+        +residualBalance(String periodMonth, Long legalEntityId) void
+    }
+
+    class LeaveLedgerService {
+        <<service>>
+        +grant(Long employmentId, Long leaveTypeId, BigDecimal days, String reason) void
+        +use(Long employmentId, Long leaveTypeId, BigDecimal days, Long refId) void
+        +carryover(Short bizYear) void
+        +rebuild(Long employmentId, Short bizYear) void
+        +adjust(Long employmentId, Long leaveTypeId, BigDecimal newValue, String reason, Long operator) void
+    }
+
+    class OrgVersionService {
+        <<service>>
+        +publish(Long changeOrderId) OrgVersion
+        +routeToVersion(Long versionId) OrgQueryRouter
+        +rebuildStat(Long orgVersionId, String periodMonth) void
+    }
+
+    class ToolInvoker {
+        <<service>>
+        +invoke(String toolName, String args, McpCallContext ctx) McpResult
+        +checkScope(String toolName, McpCallContext ctx) void
+        +requirePlan(String toolName, String args, McpCallContext ctx) McpPlan
+        +guardConfirmation(McpPlan plan, McpCallContext ctx) ConfirmResult
+    }
+
+    class ConfirmGate {
+        <<service>>
+        +evaluate(McpPlan plan, McpCallContext ctx) ConfirmDecision
+        +thresholdOf(String toolName) int
+        +toElicitation(McpPlan plan) ElicitationRequest
+    }
+
+    class QuotaGuard {
+        <<service>>
+        +tryAcquire(String clientId, String userId, String toolName) Permit
+        +recordFailure(String clientId) void
+        +isCircuitOpen(String clientId) boolean
+    }
+
+    class CallAuditor {
+        <<service>>
+        +record(McpCallContext ctx, McpResult result, List~Long~ affectedRowIds) void
+        +digest(String args) String
+    }
+
+    class ApprovalService {
+        <<service>>
+        +submit(String bizType, Long bizId, Principal p) Long
+        +approve(Long taskId, ApproverCapable p, String comment) void
+        +onApproved(Long instanceId) void
+        +publishVersion(Long versionId, Principal p) void
+    }
+
+    class SysApprovalTemplate {
+        +Long id
+        +String bizType
+        +String name
+        +String status
+        +String nodeJson_DEPRECATED
+    }
+
+    class SysApprovalFlowVersion {
+        +Long id
+        +Long templateId
+        +Integer versionNo
+        +FlowVersionStatus status
+        +String definitionHash
+        +Instant publishedAt
+        +String changeNote
+        +isFrozen() boolean
+    }
+
+    class SysApprovalNodeDef {
+        +Long id
+        +Long versionId
+        +Integer seq
+        +NodeType nodeType
+        +SignMode signMode
+        +BigDecimal approveThreshold
+        +Boolean allowAddsign
+        +Integer timeoutHours
+        +TimeoutAction timeoutAction
+    }
+
+    class SysApprovalInstance {
+        +Long id
+        +Long templateId
+        +Long flowVersionId
+        +Long orgSnapshotVersionId
+        +String payloadSnapshot
+        +String status
+        +Integer currentNode
+    }
+
+    class SysApprovalItem {
+        +Long id
+        +Long instanceId
+        +Integer itemSeq
+        +String entity
+        +Long entityId
+        +String fieldPath
+        +String oldValue
+        +String newValue
+        +String valueType
+    }
+
+    class SysCheckRegistry {
+        +String checkCode
+        +String name
+        +String domain
+        +String kind
+        +String guardObject
+        +String guardSchema
+        +String guardTable
+        +String guardKind
+        +String guardDebtOwner
+        +LocalDate guardDebtDue
+        +String runner
+        +String assertionSql
+        +String fixtureAccept
+        +String fixtureReject
+        +BigDecimal boundaryUnit
+        +String verdict
+        +LocalDate verdictDue
+        +String verdictOwner
+        +Boolean enabled
+    }
+
+    class SysCheckRun {
+        +Long id
+        +String checkCode
+        +Instant runAt
+        +String outcome
+        +Long hitCount
+        +String sample
+        +Integer durationMs
+    }
+
+    class DecisionMeasurement {
+        +Long id
+        +String queryHash
+        +String resultHash
+        +String resultRows
+        +Integer resultRowCount
+        +Instant executedAt
+        +LocalDate dueAt
+    }
+
+    %% ========== 关系 ==========
+    SysApprovalInstance "1" --> "1..*" SysApprovalItem : 明细（new_value 必填）
+    SysCheckRegistry "1" --> "0..*" SysCheckRun : 每次跑一行（exercised 由此派生）
+    SysCheckRegistry ..> DecisionMeasurement : 算法类断言冻结测值
+    OrgUnit "1" --> "0..*" OrgUnit : parent/children
+    OrgUnit "1" --> "1" OrgHeadcount : 编制
+    OrgUnit ..> MetricDefinition : 徽标由 v_org_unit_stat 视图聚合（非物化 ADR A9）
+    OrgUnit "1" --> "0..1" AttendanceGroup : 1:1 规则归属
+    OrgUnit "1" --> "0..*" OrgChangeOrder : 变更来源
+    OrgVersion "1" --> "1..*" OrgUnit : 快照切片
+    OrgChangeOrder --> ApprovalService : 审批后执行
+
+    Employment "1" --> "1" Person
+    Employment "1" --> "1..*" EmploymentSegment : 多段任职
+    Employment "1" --> "0..*" Contract
+    Employment "1" --> "0..*" Certificate
+    Employment "1" --> "0..*" HrChangeOrder
+    Employment "1" --> "0..*" EmployeeOrgAssignment : 归属版本（排班/考勤组织不落主档）
+    Employment "1" --> "0..*" EmployeeStoreAssignment : 额外出勤门店 SCD
+    Employment "1" --> "0..*" ScheduleAssignment
+    Employment "1" --> "0..*" AttendancePunch : 原始流水
+    Employment "1" --> "0..*" AttendanceDaily : 人日判定单元
+    Employment "1" --> "0..*" LeaveQuotaLedger
+    Employment "1" --> "0..*" PayrollRecord
+    Employment "1" --> "0..*" PerfResult
+    Employment --> OrgUnit : primary_org_id（编制组织）
+    Employment --> AttendanceGroup : N:1 人员归属
+
+    Shift "1" --> "0..*" ScheduleAssignment
+    SchedulePeriod "1" --> "1..*" ScheduleAssignment
+    EmployeeStoreAssignment "1" --> "0..*" ScheduleAssignment : 授权来源
+    ScheduleAssignment "0..1" --> "0..*" AttendanceDailyStore : assignment_id（fallback 时为空）
+    AttendancePunch "1" --> "0..*" AttendanceDailyStorePunch : 关联
+    AttendanceDailyStore "1" --> "1..*" AttendanceDailyStorePunch : role first_in/last_out/middle
+    AttendanceDaily "1" --> "1..*" AttendanceDailyStore : 跨店多段（人日合并）
+    AttendanceDailyStore "1" --> "1..*" AttendanceDailyStoreSegment : 类型段（严格铺满 span）
+    HourType "1" --> "0..*" AttendanceDailyStoreSegment : hour_type
+    AttendanceStatus "1" --> "0..*" AttendanceDaily : attendance_status
+    ComplianceProfile "1" --> "0..*" EmployeeComplianceProfile : 画像
+    Employment "1" --> "0..*" EmployeeComplianceProfile : 该用哪个（显式关联）
+    Employment "1" --> "0..*" AttendanceLeaveSlice : 请假切片
+    LeaveRequest "1" --> "0..*" AttendanceLeaveSlice : 按段切片
+    AttendanceLeaveSlice "0..1" --> "0..*" AttendanceLeaveConflict : 冲突
+    AttendanceDailyStore "1" --> "0..*" AttendanceBreakSkipLog : 跳过休息留痕
+    AttendanceDaily "1" --> "0..*" AttendanceDailyRemoved : 删除留痕
+    Vendor "1" --> "0..*" ContractorPresence : 承揽在场（不进工时模型）
+    AttendanceDaily "1" --> "0..*" AttendanceException
+    PeriodSeal "1" --> "0..*" AttendanceDaily : 封账锁定
+
+    LeaveType "1" --> "0..*" LeaveQuotaLedger
+    LeaveQuotaLedger "1" --> "1" LeaveBalanceSnapshot : 派生（只追加）
+    LeaveType "1" --> "0..*" LeaveRequest
+    LeaveRequest ..> LeaveQuotaLedger : 核销产生 USE 行
+
+    PayScheme "1" --> "1..*" PayItem
+    PayScheme "1" --> "0..*" PayrollPeriod
+    PayrollPeriod "1" --> "1..*" PayrollRecord
+    PayrollPeriod "1" --> "0..*" PayBatch : 一期间多批次（非多期间）
+    PayBatch "1" --> "1..*" BankPaymentLine
+    PayrollRecord "1" --> "1..*" PayrollRecordItem
+    PayrollRecord "1" --> "1..*" PayrollCostAllocation : 分摊子表，不回写主表（ΣCi 恒等 S）
+    PayrollRecord "0..*" --> "0..*" PayrollTransfer : 借调计价差 Di（ΣDi 恒等 0，不进合计）
+    PayrollRecord "0..*" --> "1" PayrollCalcRun : 版本式重算
+    PayrollCalcRun --> PayrollEngine
+    PayrollEngine --> FormulaCompiler
+    PayrollEngine --> AllocationService
+    PayrollEngine --> BalanceValidator
+    SiPlan "1" --> "0..*" PayrollRecord : 社保基数快照来源
+    TaxAccumulation "1" --> "0..*" PayrollRecord : 个税累计快照来源
+    AttendanceDaily "1" --> "0..*" PayrollRecord : 封账后的工时事实（双口径天数 + 加班三类）
+
+    PerfTemplate "1" --> "1..*" PerfIndicator
+    PerfCycle "1" --> "1" PerfTemplate
+    PerfCycle "1" --> "1..*" PerfResult
+    PerfUnit "1" --> "0..*" PerfResult : 绩效单元
+    PerfUnit "1" --> "0..*" PerfBonusPool
+    PerfResult ..> PayrollRecord : 双系数进入算薪
+
+    SysUser "1" --> "1..*" SysUserRole
+    SysRole "1" --> "1..*" SysUserRole
+    SysRole "1" --> "0..*" SysPermission : 功能轴
+    SysRole "1" --> "0..*" SysFieldPermission : 字段轴
+    SysUserRole --> SysDataScope : 数据轴
+    SysUser "1" --> "0..*" McpClient : 授权绑定
+    McpClient "1" --> "0..*" McpCallLog
+    McpCallLog --> McpPlan : plan 溯源
+    SysAdjustmentOrder --> SysAuditLog : 变更留痕
+    SysJobInstance ..> PayrollCalcRun : 异步承载
+
+    ToolInvoker --> ScopeResolver
+    ToolInvoker --> ConfirmGate
+    ToolInvoker --> QuotaGuard
+    ToolInvoker --> CallAuditor
+    ToolInvoker --> FieldMasker
+    ToolInvoker --> PayrollEngine : 按工具路由
+    ToolInvoker --> ScheduleBatchService : 按工具路由
+    ToolInvoker --> LeaveLedgerService : 按工具路由
+    ToolInvoker --> OrgVersionService : 按工具路由
+    ScopeResolver --> SysUserRole
+    ScopeResolver --> SysDataScope
+    ScopeResolver --> SysFieldPermission
+
+    ScheduleBatchService --> ScheduleValidator
+    ScheduleBatchService --> SchedulePeriod
+    ScheduleBatchService --> McpPlan : 两阶段执行
+    AttendanceRecalcService --> AttendanceDaily
+    AttendanceRecalcService --> PeriodSealService
+    CostAllocationValidator --> PayrollCostAllocation
+    CostAllocationValidator --> PayrollTransfer
+    LeaveLedgerService --> LeaveQuotaLedger
+    LeaveLedgerService --> LeaveBalanceSnapshot
+    OrgVersionService --> OrgUnit
+    OrgVersionService --> OrgUnit
+    ApprovalService --> SysJobInstance : 审批通过后触发作业
+    BalanceValidator --> CostAllocationValidator
+    BalanceValidator --> MetricDefinition : 成本口径唯一来源
+
+    %% ========== 权限与审批（§6.0） ==========
+    SysDataScope "1" --> "0..*" SysDataScopeRule : 一个范围 = 一组 (维度, 值)
+    SysUserRole --> SysDataScope : 数据范围
+    SysPermissionBundle "1" --> "0..*" SysPermissionBundleItem
+    SysPermissionBundleItem ..> SysPermission : 分配时展开成 sys_role_permission
+    SysUserRole ..> AccessDecisionLog : 每次判定留痕（matched_grant_ids 复数）
+    SysPermResource ..> SysDataScopeRule : 声明受哪几个维度管辖
+    SysPermissionDeny ..> SysRole : 按角色生效
+    FieldPolicyResolver ..> SysPermissionDeny : deny 最先判，压过一切 allow
+    FieldPolicyResolver ..> SysPermResource : 先取 rowGateDims / temporalBasis
+    FieldPolicyResolver ..> SysFieldPermission : 角色级档（多角色取最严）
+    FieldPolicyResolver ..> SysNodeFieldPolicy : 节点级档（覆盖角色级）
+    FieldPolicyResolver ..> FieldPolicy : 产出 (V, E, R)
+    FieldMasker --> FieldPolicyResolver : 唯一取档入口
+    FieldPolicyResolver ..> FieldContext : exit 决定收紧档
+    SysNodeFieldPolicy --> SysApprovalNodeDef : 挂在节点上（node_id）
+    SysApprovalNodeDef --> SysApprovalFlowVersion : 属于某一版
+    SysApprovalFlowVersion --> SysApprovalTemplate : 同一流程的多个版本
+    SysApprovalInstance --> SysApprovalFlowVersion : 在途单据绑版本（不绑模板）
+    ApprovalService --> SysApprovalFlowVersion
+    ApprovalService --> SysApprovalInstance
+    NaturalPersonPrincipal ..|> Principal
+    ServiceAccountPrincipal ..|> Principal
+    NaturalPersonPrincipal ..|> ApproverCapable : ★ 只有自然人可审批
+    ApprovalService ..> ApproverCapable : 签名只收 ApproverCapable
+
+    note for ServiceAccountPrincipal "★ 不实现 ApproverCapable：\nAI / 服务账号在**编译期**就无法推进审批节点\n不是运行期 if(actor==AI) 判断"
+    note for FieldPolicyResolver "判定序固定：deny → 角色级 → 节点级取更严 → scene 收紧\n★ 节点级只能收窄（∩ 不是覆盖）：无 editable 取值\nscene 必填（list/detail/export/mcp），收紧档写死在函数里"
+    note for SysPermResource "rowGateDims 必须显式声明\n空数组 = 不受行级管辖；未登记的资源 app_begin_scope 直接抛错"
+    note for SysDataScopeRule "dimension 五值封闭：payroll_legal_entity / si_entity / cost_org / attendance_org / person\ncombinator 同一 scope 内必须统一（混用会让一个 union 吞掉整段 AND）\n★ 已知局限：si_entity 当前粒度只到法人，跨城市参保需加 value_city（§6.0.3.2 遗留）"
+    note for PermissionBundleExpander "★ 仅配置期使用：选套餐 → 逐点写 sys_role_permission\n运行期不求值套餐；ArchUnit 禁止 ..security.. / ..field.policy.. 依赖本类"
+    note for SysUserRole "授权是一段时间：EXCLUDE(user,role,scope,grant_kind, daterange(valid_from,valid_to,'[]'))\nWHERE superseded_by IS NULL —— 历史不删，被取代的排除在重叠检查外"
+    note for SysApprovalFlowVersion "PUBLISHED 即冻结（触发器，非 REVOKE）\n改流程 = 新建版本；在途单据 flowVersionId 不变"
+
+    note for Employment "人员分类三正交 + pay_mode 四轴，禁止合并\n排班/考勤组织不在这里，走 EmployeeOrgAssignment 时序表"
+    note for EmployeeOrgAssignment "EXCLUDE(employee_id, daterange) 一人一时点一份归属\n变更=关旧区间+开新区间，禁 UPDATE 历史行"
+    note for AttendanceDaily "UNIQUE(employee_id, work_date) 人日唯一\n出勤天数只能 COUNT(DISTINCT work_date)\nattendance_status 与 confirm_status 不得合并"
+    note for AttendanceDailyStore "11 快照列 + snap_utc_offset_minutes，全部 NOT NULL\n快照列禁止 GENERATED ALWAYS（只算'现在'）\nwork_date 普通列：触发器 fn_work_date + CHECK + 复合 FK(employeeId,workDate)\n不用生成列的原因：备份恢复时会被重算，计薪归属月会变"
+    note for HourType "段类型字典，禁止散落 IN 字面量\n无 unclassified：分类失败不产生段\\n长度对不上 source_kind 规则即报错"
+    note for EmployeeComplianceProfile "关联缺失不得静默合规\n兜底取 strictness_rank 最大档 + 进巡检"
+    note for PeriodSeal "封账后到达的 punch 不重算\n任何 recalc 先查此表，已封直接拒绝"
+    note for PayrollRecord "红线：一人 + 一期间 + 一法人 = 一条当前记录\nUNIQUE(...) WHERE is_current"
+    note for PayrollCostAllocation "分摊只落子表，不回写 PayrollRecord\nexternal_priced 取Pi，其余取残差，ΣCi ≡ S"
+    note for PayrollTransfer "Di 是解释字段：ΣDi ≡ 0，不进任何合计\n同 transfer_id 和不为 0 即阻断提交"
+    note for LeaveQuotaLedger "台账只追加；四态分列不合并\n余额是派生值，人工只能 adjust 留痕"
+    note for McpPlan "dry-run 产出 plan；执行必须带 planId\nargs_digest 保证预览与执行一致"

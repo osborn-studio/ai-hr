@@ -1,0 +1,32 @@
+{
+  "name": "ai-hr",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.mjs && node test/api.test.mjs && node test/persist.test.mjs && node test/backup.test.mjs && node test/db-contract.test.mjs && node test/ui.test.mjs && node test/lifecycle.mjs && node test/multi-org.mjs && node test/perm-matrix.mjs && node test/pack.mjs && node test/station-scope.mjs && node test/extra1.mjs && node test/extra2.mjs",
+    "test:db": "node test/run.mjs",
+    "test:api": "node test/api.test.mjs",
+    "test:scope": "node test/station-scope.mjs",
+    "test:life": "node test/lifecycle.mjs",
+    "test:org": "node test/multi-org.mjs",
+    "test:perm": "node test/perm-matrix.mjs",
+    "test:pack": "node test/pack.mjs",
+    "test:persist": "node test/persist.test.mjs",
+    "serve:persist": "PGLITE_DATA_DIR=./.data node app/server.mjs",
+    "demo": "PGLITE_DATA_DIR=${TMPDIR:-/tmp}/aihr-demo node test/api.test.mjs && PGLITE_DATA_DIR=${TMPDIR:-/tmp}/aihr-demo node app/server.mjs",
+    "serve": "node app/server.mjs",
+    "test:backup": "node test/backup.test.mjs",
+    "backup": "node tools/backup.mjs --out backups",
+    "restore": "node tools/restore.mjs",
+    "test:contract": "node test/db-contract.test.mjs",
+    "verify:docs": "node tools/verify-docs.mjs",
+    "verify:docs:strict": "node tools/verify-docs.mjs --strict",
+    "test:ui": "node test/ui.test.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.16"
+  },
+  "optionalDependencies": {
+    "pg": "^8.23.1"
+  }
+}
