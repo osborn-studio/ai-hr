@@ -66,7 +66,10 @@ export const navigation = [
   { id: 'payroll', name: '薪酬管理', icon: 'wallet', pages: [
     { id: 'payroll', name: '工资计算', subtitle: '批次、试算与核验', ready: true, access: canPayroll },
     {id:'payroll/contracts',name:'合同给薪核定',ready:true,access:c=>canRead(c,'payroll_sources')},
-    { id: 'payroll/rules', name: '工资项目与方案', subtitle: '工资项目、引用与精确公式', ready: true, access: canPayroll },
+    {id:'payroll/setup/items',name:'工资项目设置',subtitle:'自定义项目与发布',ready:true,access:c=>canRead(c,'payroll_config')},
+    {id:'payroll/setup/schemes',name:'工资方案设置',subtitle:'项目、依赖公式与方案版本',ready:true,access:c=>canRead(c,'payroll_config')},
+    {id:'payroll/setup/profiles',name:'员工工资档案',subtitle:'个人定薪、调薪与复核',ready:true,access:c=>canRead(c,'payroll_sources')},
+    {id:'payroll/setup/bulk',name:'批量定薪与调薪',subtitle:'批量选择、表格导入与差异预检',ready:true,access:c=>canRead(c,'payroll_sources')},
     {id:'payroll/scripts',name:'公式代码与触发器',ready:true,access:c=>canRead(c,'payroll_config')},
     {id:'payroll/finance',name:'工资付款与申报',ready:true,access:c=>canRead(c,'payroll_payment')||canRead(c,'payroll_filing')},
     { id:'payroll/settings', name:'薪酬设置', ready:true, access:c=>canRead(c,'payroll_config')||canPayroll(c) },
@@ -129,7 +132,7 @@ export const navigation = [
   { id: 'integrations', name: '集成设置', icon: 'link', bottom: true, pages: [{id:'integrations/esign',name:'合同电子签',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/sso',name:'企业平台登录',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/reminders',name:'到期提醒与通知',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/notifications',name:'审批消息与回执',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/runtime',name:'同步、打卡与消息',ready:true,access:c=>canConfigureResource(c,'integration_manage')}, { id: 'integrations/connections', name: '连接与接口对账', subtitle: '连接、组织对照与回传日志', ready: true, access: c => canConfigureResource(c, 'integration_manage') }] },
 ];
 export function visibleNavigation(capabilities) { return [...navigation].sort((a,b)=>{const order=['personal','people','payroll'];const rank=g=>order.includes(g.id)?order.indexOf(g.id):3;return rank(a)-rank(b);}).map(group => ({ ...group, pages: group.pages.filter(p => p.access(capabilities)) })).filter(group => group.pages.length); }
-export function routePage(route) {if(/^payroll\/contracts\/term\/[0-9]+$/.test(route))return navigation.flatMap(g=>g.pages).find(p=>p.id==='payroll/contracts');if(/^my\/(tasks|alerts)\/notice\/[a-f0-9]{32}$/.test(route))return navigation.flatMap(g=>g.pages).find(p=>p.id===route.split('/').slice(0,2).join('/')); return navigation.flatMap(group => group.pages).find(page => route === page.id) || (route.startsWith('people/detail/') ? { id: 'people', name: '员工全貌', ready: true, access: canPeople } : route.startsWith('payroll/batch/') ? { id: 'payroll', name: '工资批次', ready: true, access: canPayroll } : null); }
+export function routePage(route) {if(route==='payroll/rules')return navigation.flatMap(g=>g.pages).find(p=>p.id==='payroll/setup/items');if(/^payroll\/contracts\/term\/[0-9]+$/.test(route))return navigation.flatMap(g=>g.pages).find(p=>p.id==='payroll/contracts');if(/^my\/(tasks|alerts)\/notice\/[a-f0-9]{32}$/.test(route))return navigation.flatMap(g=>g.pages).find(p=>p.id===route.split('/').slice(0,2).join('/')); return navigation.flatMap(group => group.pages).find(page => route === page.id) || (route.startsWith('people/detail/') ? { id: 'people', name: '员工全貌', ready: true, access: canPeople } : route.startsWith('payroll/batch/') ? { id: 'payroll', name: '工资批次', ready: true, access: canPayroll } : null); }
 
 // Code alone is not a policy identity: CN/HK and unit scopes may share it.
 export function leaveAccountName(account, schemes) {
