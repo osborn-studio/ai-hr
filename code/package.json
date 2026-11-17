@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:portal-native && npm run test:learning-native && npm run test:standard-payroll && npm run test:integration-runtime && npm run test:demo-identity && npm run test:frontend && npm run test:workforce-native && npm run test:payroll-finance && npm run test:payroll-scripts && npm run test:time-workflow && npm run test:external-sso && npm run test:notifications",
+    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:portal-native && npm run test:learning-native && npm run test:standard-payroll && npm run test:integration-runtime && npm run test:demo-identity && npm run test:frontend && npm run test:workforce-native && npm run test:payroll-finance && npm run test:payroll-scripts && npm run test:time-workflow && npm run test:external-sso && npm run test:notifications && npm run test:recruiting-integration && npm run test:esign-integration && npm run test:sso-preflight && npm run test:notification-options && npm run test:bootstrap-projection && npm run test:payroll-field-projection",
     "test:db": "node test/run.mjs",
     "test:api": "node test/api.test.mjs",
     "test:scope": "node test/station-scope.mjs",
@@ -83,7 +83,14 @@
     "test:payroll-scripts": "node test/payroll-scripts.test.mjs && node --test test/payroll-script-engine.test.mjs",
     "test:time-workflow": "node test/time-workflow.test.mjs",
     "test:external-sso": "node test/external-sso.test.mjs",
-    "test:notifications": "node test/workflow-notifications.test.mjs"
+    "test:notifications": "node test/workflow-notifications.test.mjs",
+    "test:recruiting-integration": "node test/recruiting-integration.test.mjs",
+    "test:esign-integration": "node test/esign-integration.test.mjs",
+    "test:sso-preflight": "node test/sso-preflight.test.mjs",
+    "test:notification-options": "node test/workflow-notification-options.test.mjs",
+    "test:complete-demo": "node test/complete-demo.test.mjs",
+    "test:bootstrap-projection": "node test/bootstrap-projection.test.mjs",
+    "test:payroll-field-projection": "node test/payroll-field-projection.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",

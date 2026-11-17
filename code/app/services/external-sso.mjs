@@ -1,3 +1,4 @@
+import{ssoPreflight}from'./sso-preflight.mjs';
 import{randomBytes}from'node:crypto';
 import{companyDescendants,ledgerDescendants}from'./foundation.mjs';
 import{one,q,id,text,same,bad,deny,conflict,requireAccess,command,paging,search,currentOperator}from'./platform-core.mjs';
@@ -55,7 +56,8 @@ export async function ssoWorkspace(t,{userId,input}){
  if(view==='references')for(const a of await q(t,"SELECT a.id FROM sys_account a LEFT JOIN ty_operator_binding b ON b.account_id=a.id LEFT JOIN ty_test_account_profile p ON p.account_id=a.id WHERE a.status='active'AND(CASE WHEN b.account_id IS NOT NULL THEN b.group_id ELSE p.group_id END)=$1 ORDER BY a.id",[group])){
   const operator=await currentOperator(t,a.id);if(operator?.status==='active'&&operator.person_id&&await within(operator.company_id)&&await permitted(()=>access(t,userId,operator,'read',['local_id','external_name'])))references.operators.push(operator);
  }
- return{...paging(search(rows,input.q,['name','profile_name','display_name','login','external_id','status']),input),capabilities,...(view==='references'?{references}:{})};
+ const preflight=view==='references'?await ssoPreflight(t,{userId,connectionIds:references.connections.map(c=>c.id),references}):null;
+ return{...paging(search(rows,input.q,['name','profile_name','display_name','login','external_id','status']),input),capabilities,...(view==='references'?{references,preflight}:{})};
 }
 export async function publicEntrypoints(t){const out=[];for(const p of await q(t,'SELECT p.*,c.provider FROM ty_sso_profile p JOIN ty_integration_connection c ON c.id=p.connection_id WHERE fn_ty_sso_profile_current(p.id)ORDER BY p.id'))if(allowedOrigin(p.public_origin))out.push({key:p.public_key,name:p.name,provider:p.provider,modes:p.enabled_modes});return{entries:out};}
 export async function ssoSessionCurrent(t,token){if(!(await one(t,"SELECT to_regclass('public.ty_sso_session')IS NOT NULL ok")).ok)return true;const row=await one(t,'SELECT p.public_origin FROM sys_session n JOIN ty_sso_session s ON s.session_id=n.id JOIN ty_sso_operator_binding b ON b.id=s.binding_id JOIN ty_sso_profile p ON p.id=b.profile_id WHERE n.token_hash=$1',[sessions.hashToken(token)]);if(row&&!allowedOrigin(row.public_origin))return false;return(await one(t,'SELECT fn_ty_sso_session_current($1)ok',[sessions.hashToken(token)])).ok===true;}

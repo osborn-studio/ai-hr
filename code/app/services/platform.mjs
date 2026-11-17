@@ -33,11 +33,11 @@ async function tasks(t,userId,group,company,canExecute){const out=[],companyIds=
  }return out;
 }
 export async function queryWorkspace(t,{userId,input}){
- const base=await commonWorkspace(t,userId,input),g=base.group_id,company=input.company_id||base.current_operator.company_id||null,kind=input.kind||'portal';let rows=[],alias;
+ const base=await commonWorkspace(t,userId,input),g=base.group_id,kind=input.kind||'portal',businessList=kind==='portal'||kind==='workflows'&&['instances','tasks'].includes(input.view),company=input.company_id||(businessList?null:base.current_operator.company_id)||null;let rows=[],alias;
  if(kind==='integrations'){const integration=await import('./platform-integration.mjs');const result=await integration.queryIntegrationWorkspace(t,{userId,input:{...input,group_id:g}});return{...base,...result,capabilities:{...base.capabilities,...result.capabilities}};}
  if(kind==='permissions'){
-  const view=input.view||'operators';if(view==='options'){
-   if(!base.capabilities.can_pick_approvers&&!base.capabilities.can_manage_operators)deny('没有审批候选目录权限');rows=await visibleOperators(t,userId,g,{options:true,companyId:company});alias='operators';base.role_options=await q(t,"SELECT code,name FROM ty_auth_role WHERE group_id=$1 AND status='active'ORDER BY name",[g]);
+  const view=input.view||'operators';if(['options','notification_options'].includes(view)){
+   if(!base.capabilities.can_pick_approvers&&!base.capabilities.can_manage_operators)deny('没有流程人员候选目录权限');rows=await visibleOperators(t,userId,g,{options:view==='notification_options'?'notifications':true,companyId:company});alias='operators';base.role_options=await q(t,"SELECT code,name FROM ty_auth_role WHERE group_id=$1 AND status='active'ORDER BY name",[g]);
   }else{
    await requireAccess(t,userId,'system_configuration','read',{group_id:g,company_id:company});
    if(view==='operators'){rows=await visibleOperators(t,userId,g,{companyId:company});alias='operators';}
@@ -61,12 +61,12 @@ export async function queryWorkspace(t,{userId,input}){
    const detail=await flow.projectInstance(t,userId,id(input.id));if(!same(detail.group_id,g))deny('事项不属于当前集团');rows=[detail];alias='instances';
    base.logs=detail.logs;
   }
-  else if(view==='forms'){rows=await availableForms(t,userId,g,company,input.business_type||null);alias='forms';}
+  else if(view==='forms'){rows=await availableForms(t,userId,g,company||base.current_operator.company_id,input.business_type||null);alias='forms';}
   else if(view==='tasks'){rows=await tasks(t,userId,g,company,base.capabilities.can_execute);alias='tasks';}
   else if(view==='requests'){rows=await instances(t,userId,g,{own:true,company});alias='instances';}
   else if(view==='alerts'&&(await one(t,"SELECT to_regclass('public.ty_portal_read')IS NOT NULL ok")).ok){const alerts=await(await import('./portal-notices.mjs')).listNotices(t,{userId,input:{group_id:g,company_id:company}});rows=alerts.rows;base.unavailable_notice_domains=alerts.unavailable_domains;alias='alerts';}
   else if(view==='alerts'){for(const c of await q(t,'SELECT c.instance_id,c.seen_at FROM ty_workflow_copy c JOIN ty_workflow_instance i ON i.id=c.instance_id WHERE c.account_id=$1 AND i.group_id=$2 ORDER BY i.id DESC',[userId,g])){try{const i=await flow.projectInstance(t,userId,c.instance_id);if(company&&!same(company,i.company_id))continue;rows.push({id:i.id,title:i.title,channel:'站内抄送',issued_state:'recorded',read_state:c.seen_at?'read':'unread',business_status:i.status,seen_at:c.seen_at});}catch(e){if(!['E_TY_FORBIDDEN','E_TY_NOT_FOUND'].includes(e.code))throw e;}}alias='alerts';}else bad('个人门户视图无效');
-  base.forms=await availableForms(t,userId,g,company,input.business_type||null);
+  base.forms=await availableForms(t,userId,g,company||base.current_operator.company_id,input.business_type||null);
  }else bad('工作区类型无效');
  if(alias==='tasks'&&input.task_filter!==undefined){if(!['all','actionable','history'].includes(input.task_filter))bad('待办筛选无效');if(input.task_filter!=='all')rows=rows.filter(r=>input.task_filter==='actionable'?r.actions.length>0:r.actions.length===0);}
  rows=search(rows,input.q,['name','title','display_name','login','code','resource','account_name','role_name']);if(input.id)rows=rows.filter(r=>same(r.id,input.id));const result=paging(rows,input);return{...base,...result,[alias]:result.rows};

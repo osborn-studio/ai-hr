@@ -102,7 +102,7 @@ export async function visibleOperators(t,userId,group,{options=false,companyId=n
  LEFT JOIN ty_test_account_profile p ON p.account_id=a.id LEFT JOIN ty_company c ON c.id=CASE WHEN b.account_id IS NOT NULL THEN b.company_id ELSE p.company_id END
  WHERE CASE WHEN b.account_id IS NOT NULL THEN b.group_id ELSE p.group_id END=$1 ORDER BY a.display_name,a.id`,[group]);
  const allowed=[];for(const r of rows){if(companies&&r.company_id&&!companies.includes(String(r.company_id)))continue;if(r.company_id){const c=await one(t,'SELECT ledger_id FROM ty_company WHERE id=$1',[r.company_id]);if(!a.row({...r,ledger_id:c?.ledger_id}))continue;}else if(!a.shared(group)&&!options)continue;
- if(options){if(r.status!=='active'||['config_admin','vendor_contact','outsource_hr','outsourced_staff'].includes(r.profile_code))continue;allowed.push({id:r.id,display_name:r.display_name,company_name:r.company_name,role_labels:[r.profile_code],eligible_for_approval:true});}else allowed.push(r);}
+ if(options){const approvalEligible=!['config_admin','vendor_contact','outsource_hr','outsourced_staff'].includes(r.profile_code);if(r.status!=='active'||r.profile_code==='config_admin'||options!=='notifications'&&!approvalEligible)continue;allowed.push({id:r.id,display_name:r.display_name,company_name:r.company_name,role_labels:[r.profile_code],eligible_for_approval:approvalEligible,eligible_for_notification:true});}else allowed.push(r);}
  return allowed;
 }
 export const newSecret=()=>randomBytes(18).toString('base64url');
