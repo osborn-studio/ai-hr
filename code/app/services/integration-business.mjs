@@ -5,6 +5,7 @@ const localDay=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
 export async function requireBusinessAccess(t,{userId,groupId,row,resource='hr_people',action='read',fields=[]}){const d=await authorization(t,{userId,resource,action,groupId,companyId:row.company_id,personId:row.person_id,departmentId:row.department_id,fields});if(!d.allowed)deny('当前业务数据与字段不在同一完整授权范围');return d;}
 export async function currentIdentity(t,{connectionId,externalKind,externalId,identityId=null,at=localDay()}){const rows=await q(t,"SELECT * FROM ty_ix_identity WHERE connection_id=$1 AND external_kind=$2 AND status='approved'AND valid_from<=$3::date AND(valid_to IS NULL OR valid_to>$3::date)AND($4::text IS NULL OR external_id=$4)AND($5::bigint IS NULL OR id=$5)",[connectionId,externalKind,at,externalId??null,identityId]);if(rows.length!==1)bad('当前平台身份映射必须唯一有效');return rows[0];}
 export async function resolveDelivery(t,{userId,groupId,connection,profile,request}){
+ if(request.source_kind==='workflow_notice')return(await import('./notification-integration.mjs')).resolveWorkflowDelivery(t,{userId,groupId,connection,profile,request});
  if(!['workflow_task','portal_notice'].includes(request.source_kind))bad('通知必须引用既有真实待办或业务提醒');const recipient=id(request.recipient_account_id),op=await currentOperator(t,recipient);if(!op||op.status!=='active'||!same(op.group_id,groupId)||!op.person_id||op.profile_code==='config_admin')deny('收件人须为当前绑定的同集团真实业务操作人员');
  let route,status,revision,source;
  if(request.source_kind==='workflow_task'){

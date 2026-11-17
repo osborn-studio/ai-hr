@@ -1,3 +1,5 @@
+import{seedContractPayrollDemo}from'./seed-contract-payroll-demo.mjs';
+import{seedLeavePayrollHongKongDemo}from'./seed-leave-payroll-demo.mjs';
 // A reproducible, empty-database-only restaurant scenario. It never rewrites
 // an older demonstration, customer data, passwords or closed payroll history.
 import{randomUUID}from'node:crypto';import{resolve}from'node:path';import{pathToFileURL}from'node:url';import{mkdir,writeFile,rename}from'node:fs/promises';
@@ -5,6 +7,7 @@ import{createDb,withTx}from'../app/db.mjs';import{createApp}from'../app/server.m
 import{seed as seedWorkspace}from'../app/services/test-workspace.mjs';import{seed as seedAccounts}from'../app/services/test-accounts.mjs';import{upgradeDemo}from'../app/services/organization.mjs';import{seedOctober}from'../app/services/advanced-time-demo.mjs';import{seed as seedOutsourcing}from'../app/services/outsourcing-demo.mjs';
 import{seedPersonalPortalDemo}from'./seed-personal-portal-demo.mjs';import{seedIntegrationDemo}from'./seed-integration-runtime-demo.mjs';
 import{seedTimeWorkflowDemo}from'./seed-time-workflow-demo.mjs';import{seedWorkflowNotificationDemo}from'./seed-workflow-notification-demo.mjs';
+import{seedWorkflowNotificationsDemo}from'./seed-workflow-notifications-demo.mjs';import{approvedNotificationOrigin}from'../app/services/notification-integration.mjs';
 import{seedRecruitingSourcesDemo}from'./seed-recruiting-sources-demo.mjs';import{seedEsignDemo}from'./seed-esign-demo.mjs';
 import{seedWorkforceNativeDemo}from'./seed-workforce-native-demo.mjs';import{seedPayrollFinanceDemo}from'./seed-payroll-finance-demo.mjs';import{seedPayrollScriptDemo}from'./seed-payroll-script-demo.mjs';
 import{seedAdvancedLeaveDemo}from'./seed-advanced-leave-demo.mjs';import{seedPeopleServicesDemo}from'./seed-people-services-demo.mjs';import{seedTimeV2Demo}from'./seed-time-v2-demo.mjs';import{seedNativeHrDemo}from'./seed-native-hr-demo.mjs';import{seedStandardPayrollDemo}from'./seed-standard-payroll-demo.mjs';import{seedPerformanceDemo}from'./seed-performance-native-demo.mjs';import{seedLearningDemo}from'./seed-learning-native-demo.mjs';
@@ -12,10 +15,11 @@ import{seedAdvancedLeaveDemo}from'./seed-advanced-leave-demo.mjs';import{seedPeo
 const fail=message=>{throw new Error(message);};
 async function privateJson(directory,name,value){await mkdir(directory,{recursive:true,mode:0o700});const path=resolve(directory,name),temp=path+'.'+randomUUID()+'.tmp';await writeFile(temp,JSON.stringify(value,null,2)+'\n',{mode:0o600});await rename(temp,path);}
 
-export async function createCompleteDemo({confirmSynthetic=false,outputDirectory,password}={}){
+export async function createCompleteDemo({confirmSynthetic=false,outputDirectory,password,notificationOrigin}={}){
  if(confirmSynthetic!==true||process.env.TYHR_DEMO_OWNED_EMPTY!=='1')fail('须明确confirmSynthetic及TYHR_DEMO_OWNED_EMPTY=1，只接受新建空演示数据库');
  if(!process.env.DATABASE_URL||process.env.CONTROL_URL||process.env.PGLITE_DATA_DIR)fail('完整演示只使用明确的专用PostgreSQL空库');
  if(typeof password!=='string'||password.length<5||typeof outputDirectory!=='string'||!outputDirectory.length)fail('须在受控环境提供至少5位初始密码及本地场景输出目录');
+ const noticeOrigin=approvedNotificationOrigin(notificationOrigin??process.env.TYHR_NOTIFICATION_DEMO_ORIGIN);
  const preflight=await createDb({url:process.env.DATABASE_URL});try{if(Number((await preflight.query("SELECT count(*)n FROM pg_tables WHERE schemaname='public'")).rows[0].n)!==0)fail('目标数据库不是空库；保留并停止，不覆盖已有资料');}finally{await preflight.close();}
  const app=await createApp({skipDemoSeed:true}),db=app.db,operator=9000;
  try{
@@ -49,9 +53,12 @@ export async function createCompleteDemo({confirmSynthetic=false,outputDirectory
   const notifications=await phase('workflow_notifications',()=>seedWorkflowNotificationDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'workflow-notification-scenes.json',notifications);
   const recruiting=await phase('recruiting_sources',()=>seedRecruitingSourcesDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'recruiting-scenes.json',recruiting);
   const esign=await phase('contract_esign',()=>seedEsignDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'esign-scenes.json',esign);
+  const notificationDelivery=await phase('workflow_message_delivery_configuration',()=>seedWorkflowNotificationsDemo(db,{confirmSynthetic:true,origin:noticeOrigin}));await privateJson(outputDirectory,'workflow-message-delivery-scenes.json',notificationDelivery);
+  const leaveHongKong=await phase('hong_kong_leave_payroll_correction',()=>seedLeavePayrollHongKongDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'leave-payroll-hk-scenes.json',leaveHongKong);
+  const contractPayroll=await phase('contract_payroll_mapping',()=>seedContractPayrollDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'contract-payroll-scenes.json',contractPayroll);
   const facts=(await db.query("SELECT json_build_object('people',(SELECT count(*)FROM ty_person),'accounts',(SELECT count(*)FROM ty_test_account_profile),'stores',(SELECT count(*)FROM ty_company WHERE org_level='store'),'migrations',(SELECT count(*)FROM schema_migration))facts")).rows[0].facts;
   if(facts.people!==62||facts.accounts!==77||facts.stores!==20)fail('完整演示身份或门店数量不符合场景设计，未标完成');
-  const result={version:'TY-NATURAL-RESTAURANT-V5',synthetic_only:true,demonstration_label:'演示帐套',complete:true,...facts,external_calls:0,real_bank_payments:0,passwords_in_artifacts:false};await privateJson(outputDirectory,'complete-demo-manifest.json',result);return result;
+  const result={version:'TY-NATURAL-RESTAURANT-V6',synthetic_only:true,demonstration_label:'演示帐套',complete:true,...facts,external_calls:0,real_bank_payments:0,passwords_in_artifacts:false};await privateJson(outputDirectory,'complete-demo-manifest.json',result);return result;
  }finally{await db.close();}
 }
 
