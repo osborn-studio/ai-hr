@@ -1,4 +1,6 @@
 import { createDomainPort } from './domain-port.mjs';
+import{handleIntegrationCallback}from'./cloud-integration-callback.mjs';
+import{operations as INTEGRATION_OPERATIONS}from'./services/integration-runtime.mjs';
 import * as foundation from './services/foundation.mjs';
 import * as payroll from './services/customer-payroll.mjs';
 import * as performance from './services/customer-performance.mjs';
@@ -56,6 +58,8 @@ const nativeLearning=(method,operation=null)=>async(tx,input,context)=>{
  if(!(await tx.query("SELECT to_regclass('public.ty_lr_course')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 培训考试模块迁移尚未就绪');
  const service=await import('./services/learning-native.mjs');return service[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});
 };
+const integration=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_ix_profile')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 集成运行迁移尚未就绪');const service=await import('./services/integration-runtime.mjs');return service[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
+export function operationBodyLimit(kind,name){return(kind==='command'&&['hr.file.upload','hr.import.preview','time.import.preview','performance.import.preview','learning.import.preview','learning.course.save','system.file.upload','integration.runtime.file.preview'].includes(name)||kind==='query'&&name==='hr.import.inspect')?12*1024*1024:1024*1024;}
 export function domainOperations() {
   const query = run => ({ kind: 'query', run });
   const command = run => ({ kind: 'command', run });
@@ -79,6 +83,8 @@ export function domainOperations() {
     ...Object.fromEntries(PERFORMANCE_OPERATIONS.map(name=>[name,command(nativePerformance('dispatchCommand',name))])),
     ...Object.fromEntries(Object.entries({workspace:'queryWorkspace',export:'exportReport',paper:'paper',content:'content',person:'personHistory',import_template:'importTemplate'}).map(([name,method])=>['learning.'+name,query(nativeLearning(method))])),
     ...Object.fromEntries(LEARNING_OPERATIONS.map(name=>[name,command(nativeLearning('dispatchCommand',name))])),
+    ...Object.fromEntries(Object.entries({workspace:'queryWorkspace',export:'exportReport',file_template:'sourceTemplate'}).map(([name,method])=>['integration.runtime.'+name,query(integration(method))])),
+    ...Object.fromEntries(INTEGRATION_OPERATIONS.map(name=>[name,command(integration('dispatchCommand',name))])),
     'hr.legal.workspace':query(hr('hr-legal-subject','queryWorkspace')),
     ...Object.fromEntries(['propose','decide','apply','cancel'].map(name=>['hr.legal.'+name,command(hr('hr-legal-subject','dispatchCommand',name))])),
     'hr.workspace':query(hr('hr','queryWorkspace')),
@@ -147,7 +153,7 @@ export function domainOperations() {
 }
 
 export function createCloudApiExtension() {
-  return async function extend({ req, res, url, userId, db, readBody, runRead, runWrite }) {
+  const extend=async function extend({ req, res, url, userId, db, readBody, runRead, runWrite }) {
     if(req.method==='GET'&&url.pathname==='/api/foundation/bootstrap'){
       const i=Object.fromEntries(url.searchParams);
       await runRead(res,tx=>(import('./services/platform-adapters.mjs')).then(service=>service.bootstrap(tx,{userId,...scope(i)})));
@@ -161,8 +167,7 @@ export function createCloudApiExtension() {
       return true;
     }
     let input;
-    const upload=match[1]==='command'&&['hr.file.upload','hr.import.preview','time.import.preview','performance.import.preview','learning.import.preview','learning.course.save','system.file.upload'].includes(match[2])||match[1]==='query'&&match[2]==='hr.import.inspect';
-    try { input = JSON.parse((await readBody(req, upload?12*1024*1024:1024*1024)).toString('utf8')); }
+    try { input = JSON.parse((await readBody(req,operationBodyLimit(match[1],match[2]))).toString('utf8')); }
     catch (error) { if(error.code==='E_BODY_TOO_LARGE')throw error;throw new Error('E_TY_ARGUMENT: 请求内容不是有效JSON对象'); }
     const [ , kind, name ] = match;
     const port = createDomainPort({ db, operations: domainOperations() });
@@ -172,4 +177,6 @@ export function createCloudApiExtension() {
       fn: tx => port.executeCommand(name, input, context, { tx, operationId: req.headers['idempotency-key'] || input?.client_operation_id }) });
     return true;
   };
+  extend.public=handleIntegrationCallback;
+  return extend;
 }

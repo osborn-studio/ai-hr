@@ -2,15 +2,15 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createBrokerClient, createDomainPort, portError } from './domain-port.mjs';
 import { createFrontendHandler, FRONTEND_HEADERS } from './frontend-static.mjs';
-import { domainOperations } from './cloud-api.mjs';
+import { domainOperations,operationBodyLimit } from './cloud-api.mjs';
 import { toHttp } from './errors.mjs';
 
 const json = (res, status, body) => { res.writeHead(status, { ...FRONTEND_HEADERS, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
-async function body(req) {
+async function body(req,limit=1024*1024) {
   const chunks = []; let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 1024 * 1024) throw portError('E_BODY_TOO_LARGE', '请求超过允许大小', 413);
+    if (size > limit) throw portError('E_BODY_TOO_LARGE', '请求超过允许大小', 413);
     chunks.push(chunk);
   }
   try {
@@ -56,6 +56,7 @@ export async function createBrokerApp(config, { broker: suppliedBroker } = {}) {
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
+      if(/^\/api\/integrations\/callback\//.test(url.pathname))return json(res,503,{error:'E_CALLBACK_BACKEND_REQUIRED',message:'请将签名回调接入Broker服务端事务处理器'});
       if (url.pathname === '/livez') return json(res, 200, { status: 'alive', mode: 'broker' });
       if (url.pathname === '/readyz') { await broker.initialize(); return json(res, 200, { status: 'ready', mode: 'broker', protocol: 'tyhr-domain-port/1' }); }
       if (await serve(req, res)) return;
@@ -82,7 +83,7 @@ export async function createBrokerApp(config, { broker: suppliedBroker } = {}) {
       if (url.pathname === '/api/me/password' && req.method === 'POST') return json(res, 200, await broker.call('command', 'auth.password', await body(req), context, req.headers['idempotency-key'] || randomUUID()));
       const match = /^\/api\/v2\/(query|command)\/([a-z][a-z0-9._-]{1,100})$/.exec(url.pathname);
       if (match && req.method === 'POST') {
-        const input = await body(req);
+        const input = await body(req,operationBodyLimit(match[1],match[2]));
         const result = match[1] === 'query'
           ? await port.queryView(match[2], input, context)
           : await port.executeCommand(match[2], input, context, { operationId: req.headers['idempotency-key'] || input.client_operation_id });

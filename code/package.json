@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:portal-native && npm run test:learning-native && npm run test:standard-payroll && npm run test:demo-identity && npm run test:frontend",
+    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:portal-native && npm run test:learning-native && npm run test:standard-payroll && npm run test:integration-runtime && npm run test:demo-identity && npm run test:frontend",
     "test:db": "node test/run.mjs",
     "test:api": "node test/api.test.mjs",
     "test:scope": "node test/station-scope.mjs",
@@ -76,7 +76,8 @@
     "test:demo-identity": "node test/native-payroll-hr-combination.test.mjs && TYHR_PERFORMANCE_HR_COMBINED=1 node test/performance-demo.test.mjs",
     "test:learning-native": "node test/learning-native.test.mjs && node test/learning-demo.test.mjs && node --test test/learning-worker.test.mjs",
     "test:standard-payroll": "node test/payroll-minimum-review.test.mjs && node test/standard-payroll-demo.test.mjs",
-    "test:portal-native": "node test/portal-files.test.mjs && node --test test/broker-originals.test.mjs"
+    "test:portal-native": "node test/portal-files.test.mjs && node --test test/broker-originals.test.mjs",
+    "test:integration-runtime": "node test/integration-runtime.test.mjs && node --test test/integration-providers.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16"

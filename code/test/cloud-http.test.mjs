@@ -71,6 +71,7 @@ async function brokerFixture(t) {
       if (name === 'auth.capabilities') return { profile_code: 'demo', resources: {} };
       if (name === 'foundation.bootstrap') return { groups: [{ id: 1, name: '虚构集团' }], actor: context.userId };
       if (name === 'leave.adjustment.apply') return { adjustment: { id: input.id, status: 'applied' }, operation: operationId };
+      if(name==='system.file.upload')return{byte_length:Buffer.from(input.content_base64,'base64').length};
       if (name === 'auth.logout') return { revoked: true };
       throw portError('E_OPERATION_NOT_AVAILABLE', '测试适配器未配置此操作', 503);
     },
@@ -119,3 +120,12 @@ test('broker capability failure prevents creation of an accepting server', async
   const directory = await buildFixture(t);
   await assert.rejects(createBrokerApp({ frontendDir: directory }, { broker: { initialize: async () => { throw portError('E_BROKER_CAPABILITY', 'missing atomic contract', 503); } } }), { code: 'E_BROKER_CAPABILITY' });
 });
+
+
+test('Broker HTTP accepts the full original upload and keeps smaller ordinary command limits',async t=>{
+ const{url,calls}=await brokerFixture(t),bytes=Buffer.alloc(8*1024*1024,65),send=(name,input)=>fetch(url+'/api/v2/command/'+name,{method:'POST',headers:{...headers,'Idempotency-Key':'ORIGINAL-HTTP-BOUNDED-KEY'},body:JSON.stringify(input)});
+ const upload=await send('system.file.upload',{content_base64:bytes.toString('base64'),filename:'owned-original.pdf'});assert.equal(upload.status,200);assert.equal((await upload.json()).byte_length,bytes.length);assert.equal(calls.filter(x=>x.name==='system.file.upload').length,1);
+ const ordinary=await send('leave.adjustment.apply',{id:10,reason:'x'.repeat(1024*1024)});assert.equal(ordinary.status,413);assert.equal(calls.filter(x=>x.name==='leave.adjustment.apply').length,0);
+ const tooLarge=await send('system.file.upload',{content_base64:'x'.repeat(13*1024*1024)});assert.equal(tooLarge.status,413);assert.equal(calls.filter(x=>x.name==='system.file.upload').length,1);
+});
+test('Broker callback without a local transaction backend never acknowledges a provider event',async t=>{const{url,calls}=await brokerFixture(t),response=await fetch(url+'/api/integrations/callback/1');assert.equal(response.status,503);assert.equal((await response.json()).error,'E_CALLBACK_BACKEND_REQUIRED');assert.equal(calls.length,0);});

@@ -802,6 +802,7 @@ export async function createApp({ apiExtension = null, skipDemoSeed = false } = 
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://x');
+      if(apiExtension?.public&&await apiExtension.public({req,res,url,db,readBody}))return;
 
       // ★ 多帐套：先按 token 前缀选库，再让**整个请求**跑在那个库上。
       //   必须放在最前面 —— 会话表在帐套库里，选错库连"你是谁"都查不出来。
