@@ -1,6 +1,7 @@
 import{sameHuman,humanIsPerson}from'./human-identity.mjs';
 import{one,same,bad,deny,conflict,id,hash,requireAccess}from'./platform-core.mjs';
 import{accountContext,submitRequest}from'./advanced-leave.mjs';
+import{assertRequestRosterCurrent}from'./leave-roster-source.mjs';
 
 export async function leaveRequestSource(t,requestId){
  const row=await one(t,`SELECT r.*,a.relationship_id,l.group_id,l.person_id,e.company_id,
@@ -12,7 +13,7 @@ export async function submitLeaveSubject(t,{userId,input,values,form,operationId
  if(input.subject_id||values.request_id){
   const source=await leaveRequestSource(t,input.subject_id||values.request_id);if(!same(source.group_id,form.group_id)||!await sameHuman(t,source.request.created_by,userId))deny('只能将本人经办的原请假单转入审批');if(source.request.status!=='pending')conflict('原请假单已处理');
   await accountContext(t,{userId,accountId:source.request.account_id,resource:'advanced_leave_manage',write:true,selfAllowed:true,action:'submit',fields:['quantity','facts']});
-  await ensureFormBinding(t,userId,form,input,source);
+  await assertRequestRosterCurrent(t,source.request);await ensureFormBinding(t,userId,form,input,source);
   const r=source.request;return{type:'leave_request',id:r.id,hash:source.source_hash,person_id:source.person_id,company_id:source.company_id,authoritative_quantity:String(r.quantity),authoritative_values:{request_id:String(r.id),account_id:String(r.account_id),employment_id:String(r.employment_id),scheme_id:String(r.scheme_id),quantity:String(r.quantity),starts_at:new Date(r.starts_at).toISOString(),ends_at:new Date(r.ends_at).toISOString()}};
  }
  const employment=await one(t,'SELECT * FROM ty_employment WHERE id=$1',[id(values.employment_id)]);if(!employment||!same(employment.group_id,form.group_id))bad('请假公司与集团不符');if(input.company_id&&!same(input.company_id,employment.company_id))bad('当前公司与请假实际任职公司不符');
@@ -34,6 +35,7 @@ export async function executeApprovedLeave(t,{userId,id:requestId,approvalReceip
  if(source.source_hash!==frozenApproval.source_hash){await t.query("UPDATE ty_workflow_instance SET status='blocked',business_state='blocked',revision=revision+1 WHERE id=$1",[receipt.instance_id]);return{blocked:true,source_changed:true};}
 
  if(!await sameHuman(t,receipt.original_requester_id,request.created_by)||await sameHuman(t,receipt.approved_by,request.created_by)||await humanIsPerson(t,receipt.approved_by,source.group_id,source.person_id)||!same(receipt.execution_actor_id,userId))deny('请假审批的申请人、批准人或实际执行人不符');
+ await assertRequestRosterCurrent(t,request);
  if(request.status==='approved'){
   const existing=await one(t,"SELECT 1 FROM ty_workflow_instance WHERE id=$1 AND business_state='applied'",[receipt.instance_id]);if(!existing||!same(request.approved_by,receipt.approved_by))conflict('请假已由其他路径处理');return{request,replayed:true};
  }
