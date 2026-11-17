@@ -167,6 +167,7 @@ export function domainOperations() {
     'system.workflow.preview':query(system('previewWorkflow')),
     'system.authorization.simulate':query(system('simulateAuthorization')),
     'system.operation.status':query(system('operationStatus')),
+  'time.leave.sources':query(async(tx,input,context)=>(await import('./services/time-leave-source.mjs')).reportLeaveSources(tx,{userId:context.userId,input})),
     'time.workspace':query(async(tx,i,c)=>{const installed=(await tx.query("SELECT to_regclass('public.ty_tw_execution')IS NOT NULL ok")).rows[0].ok;return(await import(installed?'./services/time-workflow.mjs':'./services/advanced-time-v2.mjs')).queryWorkspace(tx,{userId:c.userId,input:i});}),
     'time.workflow.submit':command(async(tx,input,c)=>{if(!(await tx.query("SELECT to_regclass('public.ty_tw_execution')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 排班考勤审批尚未就绪');return(await import('./services/time-workflow.mjs')).submitTimeWorkflow(tx,{userId:c.userId,input,operationId:c.operationId});}),
     'time.export':query(async(tx,i,c)=>(await import('./services/advanced-time-v2.mjs')).exportReport(tx,{userId:c.userId,input:i})),
