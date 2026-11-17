@@ -4,9 +4,9 @@ import { Button, DataTable, ErrorState, Loading, Modal, Notice, useRemote } from
 import { list, PLATFORM_OPERATIONS, STATE_NAMES } from '../../platform-model.mjs';
 
 export const stateName = value => STATE_NAMES[value] || value || '待核实';
-export function usePlatformWorkspace({ api, scope, scopeKey, kind, view, id = '', query = '', page = 1, pageSize = 10 }) {
-  const input = { kind, view, group_id: scope.group_id || undefined, company_id: scope.company_id || undefined, id: id || undefined, q: query, page, page_size: pageSize };
-  return useRemote(async signal => { const result = await api.request('/api/v2/query/system.workspace', { method: 'POST', body: input, signal }); if (!Array.isArray(result?.rows) || result.total === undefined || !result.capabilities) throw Object.assign(new Error('服务未返回有效的授权工作区，请重新读取；没有把异常当作空数据。'), { code: 'E_RESPONSE_FORMAT' }); return result; }, JSON.stringify([scopeKey, kind, view, id, query, page, pageSize]));
+export function usePlatformWorkspace({ api, scope, scopeKey, kind, view, id = '', query = '', page = 1, pageSize = 10, businessType }) {
+  const input = { kind, view, group_id: scope.group_id || undefined, company_id: scope.company_id || undefined, id: id || undefined, q: query, page, page_size: pageSize, ...(businessType?{business_type:businessType}:{}) };
+  return useRemote(async signal => { const result = await api.request('/api/v2/query/system.workspace', { method: 'POST', body: input, signal }); if (!Array.isArray(result?.rows) || result.total === undefined || !result.capabilities) throw Object.assign(new Error('服务未返回有效的授权工作区，请重新读取；没有把异常当作空数据。'), { code: 'E_RESPONSE_FORMAT' }); return result; }, JSON.stringify([scopeKey, kind, view, id, query, page, pageSize, businessType]));
 }
 export function WorkspaceState({ state, children }) { return state.loading ? <Loading>正在读取授权配置与版本</Loading> : state.error ? <ErrorState error={state.error} retry={state.reload}/> : children(state.data); }
 export function usePlatformCommands({ api, session, notify, onCompleted }) {

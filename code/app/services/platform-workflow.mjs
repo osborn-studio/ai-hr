@@ -1,3 +1,4 @@
+import{grantAllowsField}from'./platform-core.mjs';
 import{sameHuman,humanIsPerson}from'./human-identity.mjs';
 import{q,one,same,bad,deny,conflict,missing,id,text,obj,revision,groupFor,rowScope,requireAccess,authorization,command,audit,emit,hash,currentOperator,visibleOperators}from'./platform-core.mjs';
 import{validateGraph,validateSchema,validateValues,nextNode,projectValues}from'../platform-model.mjs';
@@ -5,6 +6,27 @@ import{validateGraph,validateSchema,validateValues,nextNode,projectValues}from'.
 const projectReceipt=(t,userId)=>async result=>result.instance?{...result,instance:await projectInstance(t,userId,result.instance.id)}:result;
 const TABLES={workflow:'ty_workflow_definition',form:'ty_form_definition'};
 const RESOURCE='workflow_manage';
+// Each business adapter reopens its own source and current complete grants.
+// Generic workflow values never substitute for payroll/personnel authority.
+async function businessAdapter(t,type){
+ if(['payroll_source_preview','payroll_batch'].includes(type)){
+  if(!(await one(t,"SELECT to_regclass('public.ty_pay_batch')IS NOT NULL ok")).ok)bad('薪酬业务适配器尚未安装');
+  const a=await import('./platform-payroll.mjs');return{submit:a.submitPayrollSubject,approve:a.assertPayrollApproval,project:a.projectPayrollInstance,execute:a.executePayrollSubject,reject:a.rejectPayrollSubject,cancel:a.cancelPayrollSubject};
+ }
+ if(type==='hr_change'){
+  if(!(await one(t,"SELECT to_regclass('public.ty_hr_change_request')IS NOT NULL ok")).ok)bad('人事异动适配器尚未安装');
+  const a=await import('./platform-hr.mjs');return{submit:a.submitHrSubject,approve:a.assertHrApproval,project:a.projectHrInstance,execute:a.executeHrSubject,reject:a.rejectHrSubject,cancel:a.cancelHrSubject};
+ }
+ if(['hr_requisition','hr_offer','hr_contract_sign','hr_contract_term'].includes(type)){
+  if(!(await one(t,"SELECT to_regclass('public.ty_hr_record_proposal')IS NOT NULL ok")).ok)bad('招聘合同审批适配器尚未安装');
+  const a=await import('./platform-hr-records.mjs');return{submit:a.submitHrRecordSubject,approve:a.assertHrRecordApproval,project:a.projectHrRecordInstance,execute:a.executeHrRecordSubject,reject:a.rejectHrRecordSubject,cancel:a.cancelHrRecordSubject};
+ }
+ if(type==='performance_result'){
+  if(!(await one(t,"SELECT to_regclass('public.ty_pr_cycle_root')IS NOT NULL ok")).ok)bad('绩效结果审批模块尚未安装');
+  const a=await import('./platform-performance.mjs');return{submit:a.submitPerformanceSubject,approve:a.assertPerformanceApproval,project:a.projectPerformanceInstance,execute:a.executePerformanceSubject,reject:a.rejectPerformanceSubject,cancel:a.cancelPerformanceSubject};
+ }
+ return null;
+}
 async function definition(t,kind,key){const r=await one(t,`SELECT * FROM ${TABLES[kind]} WHERE id=$1`,[id(key)]);if(!r)missing();return r;}
 async function scope(t,userId,group,company=null,action='write'){await requireAccess(t,userId,RESOURCE,action,{group_id:group,company_id:company});}
 async function validateRefs(t,schema,values,group,company,userId){
@@ -15,6 +37,13 @@ async function validateRefs(t,schema,values,group,company,userId){
  }
 }
 async function optionsFor(t,userId,group,company){return visibleOperators(t,userId,group,{options:true,companyId:company});}
+export async function assertDomainApproval(t,{userId,instance}){
+ if(instance.subject_type==='leave_request'){
+  const source=await(await import('./platform-leave.mjs')).leaveRequestSource(t,instance.subject_id);
+  await(await import('./advanced-leave.mjs')).accountContext(t,{userId,accountId:source.request.account_id,resource:'advanced_leave_approve',write:true,action:'approve',fields:['status','quantity','facts']});
+ }else if(instance.subject_type==='leave_lifecycle_proposal')await(await import('./leave-lifecycle.mjs')).assertProposalApprovalAccess(t,{userId,id:instance.subject_id});
+ else{const a=await businessAdapter(t,instance.subject_type);if(a)await a.approve(t,{userId,instance});}
+}
 async function resolveApprovers(t,instance,node){
  const explicit=[...new Set((node.approver_ids||[]).map(x=>id(x)))],eligible=await q(t,`SELECT a.id FROM sys_account a LEFT JOIN ty_operator_binding b ON b.account_id=a.id LEFT JOIN ty_test_account_profile p ON p.account_id=a.id WHERE a.status='active' AND coalesce(b.group_id,p.group_id)=$1 AND coalesce(b.profile_code,p.profile_code)NOT IN('config_admin','vendor_contact','outsource_hr','outsourced_staff')`,[instance.group_id]);
  const candidates=new Map(eligible.map(x=>[String(x.id),x]));const roleCodes=node.role_codes||[];
@@ -25,8 +54,7 @@ async function resolveApprovers(t,instance,node){
   if(delegation&&candidates.has(String(delegation.to_account_id)))actor=Number(delegation.to_account_id);
   if(await sameHuman(t,actor,instance.applicant_id)||await humanIsPerson(t,actor,instance.group_id,instance.person_id))continue;
   if(!(await authorization(t,{userId:actor,resource:'workflow_self',action:'approve',groupId:instance.group_id,companyId:instance.company_id})).allowed)continue;
-  if(instance.subject_type==='leave_request'&&!(await authorization(t,{userId:actor,resource:'advanced_leave_approve',action:'approve',groupId:instance.group_id,companyId:instance.company_id,personId:instance.person_id})).allowed)continue;
-  if(instance.subject_type==='leave_lifecycle_proposal'){try{await(await import('./leave-lifecycle.mjs')).assertProposalApprovalAccess(t,{userId:actor,id:instance.subject_id});}catch(e){if(String(e.message).startsWith('E_TY_FORBIDDEN:'))continue;throw e;}}
+  try{await assertDomainApproval(t,{userId:actor,instance});}catch(e){if(String(e.message).startsWith('E_TY_FORBIDDEN:'))continue;throw e;}
   out.push(actor);
  }return[...new Set(out)];
 }
@@ -112,43 +140,47 @@ async function subjectFor(t,userId,f,input,values,operationId){
   for(const c of companies){const requirement=await approvalRequirement(t,{userId,subjectType:f.business_type,groupId:f.group_id,companyId:c.company_id,kind:p.kind});if(requirement.required&&!same(requirement.form_id,f.id))bad('实际关系公司存在不同审批绑定，请由集团统一核定，不能改选较弱流程');}
   return{type:f.business_type,id:p.id,hash:p.payload_hash,person_id:p.person_id,company_id:ownerCompany||null,group_scoped:!ownerCompany};
  }
+ const adapter=await businessAdapter(t,f.business_type);if(adapter)return adapter.submit(t,{userId,input,values,form:f});
  bad('该业务执行适配器尚未接入；请使用普通表单，不能冒称业务已经生效');
 }
 export async function submitInstance(t,{userId,input,operationId}){
- const f=await definition(t,'form',input.form_id),operator=await currentOperator(t,userId),company=id(input.company_id??operator?.company_id,true);
+ const f=await definition(t,'form',input.form_id),operator=await currentOperator(t,userId),company=id(input.company_id===undefined?operator?.company_id:input.company_id,true);
  await requireAccess(t,userId,'workflow_self','submit',{group_id:f.group_id,company_id:company,person_id:operator?.person_id});
  return command(t,{userId,groupId:f.group_id,operation:'instance.submit',operationId,input,project:projectReceipt(t,userId),execute:async()=>{
   if(f.status!=='published')bad('只能使用已发布表单');if(f.company_id&&(!company||!same(f.company_id,company)))bad('表单不适用于当前公司');
   const w=await definition(t,'workflow',f.workflow_id);if(w.status!=='published')bad('流程版本已停用，请刷新可发表单');const parsed=validateValues(f.schema,input.values);if(!parsed.valid)bad(parsed.issues.join('；'));await validateRefs(t,f.schema,parsed.values,f.group_id,company,userId);
+  await requireAccess(t,userId,'workflow_self','submit',{group_id:f.group_id,company_id:company,person_id:operator?.person_id,fields:Object.keys(parsed.values)});
   const subject=await subjectFor(t,userId,f,input,parsed.values,operationId);
   const frozenValues={...parsed.values};for(const [key,value]of Object.entries(subject.authoritative_values||{}))if(Object.hasOwn(frozenValues,key))frozenValues[key]=value;if(subject.authoritative_quantity&&Object.hasOwn(frozenValues,'quantity'))frozenValues.quantity=subject.authoritative_quantity;
-  const inst=await one(t,`INSERT INTO ty_workflow_instance(group_id,company_id,form_id,workflow_id,form_version,workflow_version,title,applicant_id,person_id,form_values,graph_snapshot,source_hash,subject_type,subject_id)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14)RETURNING *`,[f.group_id,subject.group_scoped?null:subject.company_id||company,f.id,w.id,f.version,w.version,text(input.title||f.name,'事项标题',1,200),userId,subject.person_id||operator?.person_id||null,JSON.stringify(frozenValues),JSON.stringify(w.graph),subject.hash,subject.type,subject.id]);
+  const inst=await one(t,`INSERT INTO ty_workflow_instance(group_id,company_id,form_id,workflow_id,form_version,workflow_version,title,applicant_id,person_id,form_values,graph_snapshot,source_hash,subject_type,subject_id)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14)RETURNING *`,[f.group_id,subject.group_scoped?null:subject.company_id||company,f.id,w.id,f.version,w.version,text(subject.authoritative_title||input.title||f.name,'事项标题',1,200),userId,subject.person_id||operator?.person_id||null,JSON.stringify(frozenValues),JSON.stringify(w.graph),subject.hash,subject.type,subject.id]);
   await log(t,inst,userId,'submitted',null);await advance(t,inst,w.graph.nodes.find(n=>n.type==='start').id,userId);return{instance:await projectInstance(t,userId,inst.id)};
  }});
 }
-export async function projectInstance(t,userId,instanceId){
+export async function projectInstance(t,userId,instanceId,{fields:requestedFields=null}={}){
  const inst=await one(t,'SELECT i.*,f.schema FROM ty_workflow_instance i JOIN ty_form_definition f ON f.id=i.form_id WHERE i.id=$1',[id(instanceId)]);if(!inst)missing();const own=same(userId,inst.applicant_id),task=await one(t,'SELECT 1 FROM ty_workflow_task WHERE instance_id=$1 AND approver_id=$2',[inst.id,userId]),copy=await one(t,'SELECT 1 FROM ty_workflow_copy WHERE instance_id=$1 AND account_id=$2',[inst.id,userId]);
  const operator=await currentOperator(t,userId);if(operator?.profile_code==='config_admin')deny('系统配置不开放业务表单内容');
  if(!own&&!task&&!copy)await scope(t,userId,inst.group_id,inst.company_id,'read');else await requireAccess(t,userId,'workflow_self','read',inst);
- const allowedFields=[];for(const f of inst.schema.fields){if((await authorization(t,{userId,resource:task||copy||own?'workflow_self':'workflow_manage',action:'read',groupId:inst.group_id,companyId:inst.company_id,personId:inst.person_id,fields:[f.key]})).allowed)allowedFields.push(f.key);}
+ const decision=await authorization(t,{userId,resource:task||copy||own?'workflow_self':'workflow_manage',action:'read',groupId:inst.group_id,companyId:inst.company_id,personId:inst.person_id}),keys=requestedFields?inst.schema.fields.map(f=>f.key).filter(k=>requestedFields.includes(k)):[...inst.schema.fields.map(f=>f.key),'title','approval_reason','actor_name'];let selected=[];for(const grant of decision.allowing_grants||[]){const allowed=keys.filter(k=>grantAllowsField(grant,k));if(allowed.length>selected.length)selected=allowed;}const allowedFields=inst.schema.fields.map(f=>f.key).filter(k=>selected.includes(k));
  const values=projectValues(inst.schema,inst.form_values,{restricted:true,allowedFields});
  const visible=inst.schema.fields.filter(f=>Object.hasOwn(values,f.key));
  const out={...inst,values,value_labels:Object.fromEntries(visible.map(f=>[f.key,f.label])),value_types:Object.fromEntries(visible.map(f=>[f.key,f.type])),node_label:inst.graph_snapshot.nodes.find(n=>n.id===inst.current_node)?.label||inst.current_node};
- if(!(await authorization(t,{userId,resource:task||copy||own?'workflow_self':'workflow_manage',action:'read',groupId:inst.group_id,companyId:inst.company_id,personId:inst.person_id,fields:['title']})).allowed)out.title='审批事项';
- const reasonAllowed=(await authorization(t,{userId,resource:task||copy||own?'workflow_self':'workflow_manage',action:'read',groupId:inst.group_id,companyId:inst.company_id,personId:inst.person_id,fields:['approval_reason']})).allowed;
- const labels={submitted:'已提交','task.created':'已分配审批','task.approved':'审批通过','task.rejected':'审批驳回','task.transferred':'已转交',approved:'审批完成',blocked:'待核处理',cancelled:'申请已撤回','business.executed':'业务已办理'};
- out.logs=(await q(t,'SELECT l.id,l.node_id,l.action,l.created_at,l.metadata,a.display_name actor_name FROM ty_workflow_log l JOIN sys_account a ON a.id=l.actor_id WHERE l.instance_id=$1 ORDER BY l.id',[inst.id])).map(l=>({id:l.id,node_id:l.node_id,node_label:inst.graph_snapshot.nodes.find(n=>n.id===l.node_id)?.label||l.node_id,action:l.action,label:labels[l.action]||'处理记录',created_at:l.created_at,actor_name:l.actor_name,...(reasonAllowed&&l.metadata?.reason?{reason:l.metadata.reason}:{})}));
- delete out.form_values;delete out.graph_snapshot;delete out.schema;return out;
+ if(!selected.includes('title'))out.title='审批事项';
+ const reasonAllowed=selected.includes('approval_reason');
+ const labels={submitted:'已提交','task.created':'已分配审批','task.approved':'审批通过','task.rejected':'审批驳回','task.transferred':'已转交',approved:'审批完成',blocked:'待核处理',cancelled:'申请已撤回','business.executed':'业务已办理','business.blocked':'业务办理已阻断'};
+ out.logs=(await q(t,'SELECT l.id,l.node_id,l.action,l.created_at,l.metadata,a.display_name actor_name FROM ty_workflow_log l JOIN sys_account a ON a.id=l.actor_id WHERE l.instance_id=$1 ORDER BY l.id',[inst.id])).map(l=>({id:l.id,node_id:l.node_id,node_label:inst.graph_snapshot.nodes.find(n=>n.id===l.node_id)?.label||l.node_id,action:l.action,label:labels[l.action]||'处理记录',created_at:l.created_at,...(selected.includes('actor_name')?{actor_name:l.actor_name}:{}),...(reasonAllowed&&l.metadata?.reason?{reason:l.metadata.reason}:{})}));
+ delete out.form_values;delete out.graph_snapshot;delete out.schema;const adapter=await businessAdapter(t,inst.subject_type);return adapter?adapter.project(t,{userId,instance:out}):out;
 }
 async function taskFor(t,userId,key){const task=await one(t,'SELECT * FROM ty_workflow_task WHERE id=$1',[id(key)]);if(!task)missing();const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1 FOR UPDATE',[task.instance_id]);if(!same(task.approver_id,userId))deny('该任务未分配给当前人员');await requireAccess(t,userId,'workflow_self','approve',inst);if(await sameHuman(t,inst.applicant_id,userId)||await humanIsPerson(t,userId,inst.group_id,inst.person_id))deny('申请人不能审批本人事项');return{task,inst};}
 export async function decideInstance(t,{userId,input,operationId}){
  const{task,inst}=await taskFor(t,userId,input.task_id);
  return command(t,{userId,groupId:inst.group_id,operation:'instance.decide',operationId,input,project:projectReceipt(t,userId),execute:async()=>{
   revision(task,input.expected_revision);if(task.status!=='pending'||inst.status!=='running'||task.node_id!==inst.current_node)conflict('审批任务已变化');if(typeof input.approve!=='boolean')bad('请选择批准或驳回');const reason=text(input.reason,'审批意见',2);
+  await assertDomainApproval(t,{userId,instance:inst});
   await t.query('UPDATE ty_workflow_task SET status=$2,reason=$3,acted_at=now(),revision=revision+1 WHERE id=$1',[task.id,input.approve?'approved':'rejected',reason]);await log(t,inst,userId,input.approve?'task.approved':'task.rejected',task.node_id,{reason});
   if(!input.approve){await t.query("UPDATE ty_workflow_instance SET status='rejected',finished_at=now(),revision=revision+1,last_approver_id=$2 WHERE id=$1",[inst.id,userId]);await t.query("UPDATE ty_workflow_task SET status='cancelled',revision=revision+1 WHERE instance_id=$1 AND status='pending'",[inst.id]);
    if(inst.subject_type==='leave_request')await(await import('./platform-leave.mjs')).rejectLeaveSubject(t,{userId,instance:inst});
    else if(inst.subject_type==='leave_lifecycle_proposal')await(await import('./leave-lifecycle.mjs')).rejectWorkflowProposal(t,{userId,id:inst.subject_id,instanceId:inst.id});
+   else{const a=await businessAdapter(t,inst.subject_type);if(a)await a.reject(t,{userId,instance:inst});}
    await emit(t,inst.group_id,`workflow:${inst.id}:rejected`,'workflow.rejected',{instance_id:inst.id});}
   else{
    await t.query('UPDATE ty_workflow_instance SET last_approver_id=$2,revision=revision+1 WHERE id=$1',[inst.id,userId]);
@@ -177,7 +209,7 @@ export async function executeInstance(t,{userId,input,operationId}){
   let result;if(current.subject_type==='leave_lifecycle_proposal'){const lifecycle=await import('./leave-lifecycle.mjs');result=await lifecycle.executeApprovedProposal(t,{userId,id:current.subject_id,approvalReceiptId:current.id});}
   else if(current.subject_type==='leave_request'){result=await(await import('./platform-leave.mjs')).executeApprovedLeave(t,{userId,id:current.subject_id,approvalReceiptId:current.id});}
   else if(current.subject_type==='general'){if(!current.last_approver_id)deny('未经过实际审批节点');await t.query("UPDATE ty_workflow_instance SET business_state='not_applicable',revision=revision+1 WHERE id=$1",[inst.id]);result={business_receipt_only:true};}
-  else bad('该业务执行器尚未安装');await log(t,inst,userId,'business.executed',null,{subject_type:current.subject_type,subject_id:current.subject_id});return{instance:await projectInstance(t,userId,inst.id),result:{domain_receipt:true,subject_type:current.subject_type,subject_id:current.subject_id,external_payment_created:false}};
+  else{const a=await businessAdapter(t,current.subject_type);if(!a)bad('该业务执行器尚未安装');result=await a.execute(t,{userId,instance:current});}const blocked=!!(result?.blocked||result?.source_changed);await log(t,inst,userId,blocked?'business.blocked':'business.executed',null,{subject_type:current.subject_type,subject_id:current.subject_id});return{instance:await projectInstance(t,userId,inst.id),result:{domain_receipt:true,subject_type:current.subject_type,subject_id:current.subject_id,external_payment_created:false,...(blocked?{blocked:true,business_applied:false,source_changed:!!result?.source_changed}:{})}};
  }});
 }
 export async function cancelInstance(t,{userId,input,operationId}){
@@ -187,6 +219,7 @@ export async function cancelInstance(t,{userId,input,operationId}){
   if(current.subject_type==='leave_request'){
    const source=await(await import('./platform-leave.mjs')).leaveRequestSource(t,current.subject_id);if(source.source_hash!==current.source_hash)conflict('业务来源已变，请先核对');await(await import('./advanced-leave.mjs')).cancelRequest(t,{userId,id:current.subject_id,reason});
   }else if(current.subject_type==='leave_lifecycle_proposal')await(await import('./leave-lifecycle.mjs')).cancelProposal(t,{userId,id:current.subject_id,reason});
+  else{const a=await businessAdapter(t,current.subject_type);if(a)await a.cancel(t,{userId,instance:current,reason});}
   await t.query("UPDATE ty_workflow_task SET status='cancelled',revision=revision+1 WHERE instance_id=$1 AND status='pending'",[current.id]);
   await t.query("UPDATE ty_workflow_instance SET status='cancelled',business_state='not_applicable',finished_at=now(),revision=revision+1 WHERE id=$1",[current.id]);await log(t,current,userId,'cancelled',current.current_node,{reason});await emit(t,current.group_id,`workflow:${current.id}:cancelled`,'workflow.cancelled',{instance_id:current.id});return{instance:await projectInstance(t,userId,current.id)};
  }});

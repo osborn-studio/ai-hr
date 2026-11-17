@@ -68,5 +68,11 @@ try{
  const proxy=(await run(flow.submitInstance,{input:{form_id:pf.id,company_id:9500,title:'虚构另一HR代提本人事项',values:makeValues('28')}},9500)).instance;
  check('beneficiary HR account cannot approve leave submitted by a different HR',proxy.status==='blocked'&&!await one('SELECT 1 FROM ty_workflow_task WHERE instance_id=$1 AND approver_id=9504',[proxy.id]));
  await run(flow.cancelInstance,{input:{instance_id:proxy.id,expected_revision:proxy.revision,reason:'虚构测试代理撤回'}},9500);
+ const rw=(await run(flow.saveDefinition,{kind:'workflow',input:{group_id:9500,code:'revoked_domain',name:'实际点击时重核领域权限',business_type:'leave_request',graph}})).workflow;await run(flow.publishDefinition,{kind:'workflow',input:{id:rw.id,expected_revision:1}},9501);
+ const rf=(await run(flow.saveDefinition,{kind:'form',input:{group_id:9500,code:'revoked_domain_form',name:'虚构待办后撤权',business_type:'leave_request',schema,workflow_id:rw.id}})).form;await run(flow.publishDefinition,{kind:'form',input:{id:rf.id,expected_revision:1}},9501);
+ const rev=(await run(flow.submitInstance,{input:{form_id:rf.id,company_id:9500,title:'虚构在途后领域授权撤回',values:makeValues('30')}},9503)).instance;const rt=await one('SELECT * FROM ty_workflow_task WHERE instance_id=$1',[rev.id]);
+ await db.query("INSERT INTO ty_auth_managed(account_id,group_id,resource)VALUES(9502,9500,'advanced_leave_approve')");
+ await assert.rejects(()=>run(flow.decideInstance,{input:{task_id:rt.id,expected_revision:rt.revision,approve:true,reason:'工作流权限尚在但领域权限已撤回'}},9502));count++;
+ check('revoked domain approval cannot reuse an assigned workflow task',(await one('SELECT status FROM ty_workflow_task WHERE id=$1',[rt.id])).status==='pending'&&(await leaveRequestSource(db,rev.subject_id)).request.status==='pending');
  console.log(`Native leave + designed workflow ${count}/${count} passed`);
 }finally{await db.close();}

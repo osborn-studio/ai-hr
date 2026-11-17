@@ -56,7 +56,7 @@ export function pageRows(rows, query, page, pageSize, searchText = row => Object
 export function canRead(capabilities, resource) { return !!capabilities?.resources?.[resource]?.can_read; }
 export function canWrite(capabilities, resource) { return capabilities?.profile_code !== 'boss' && !!capabilities?.resources?.[resource]?.can_write; }
 export function canPayroll(capabilities) { return canRead(capabilities, 'payroll_run') && canRead(capabilities, 'payroll_slips_read_all') && !['config_admin', 'store_staff', 'station_staff', 'outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(capabilities?.profile_code); }
-export function canPeople(capabilities) { return ['people_read_all', 'people_self', 'employee_roster'].some(r => canRead(capabilities, r)); }
+export function canPeople(capabilities) { return ['hr_people','hr_self','people_read_all','people_self','employee_roster'].some(r => canRead(capabilities, r)); }
 
 // Menu visibility is only a hint; every platform query/command rechecks complete grants.
 export function canConfigureResource(c, resource) { return canRead(c, resource) || c.profile_code === 'config_admin' && canWrite(c, 'ledger'); }
@@ -65,31 +65,46 @@ export function canUsePortal(c) { return c.profile_code !== 'config_admin' && ca
 export const navigation = [
   { id: 'payroll', name: '薪酬管理', icon: 'wallet', pages: [
     { id: 'payroll', name: '工资计算', subtitle: '批次、试算与核验', ready: true, access: canPayroll },
-    { id: 'payroll/rules', name: '工资项目与方案', subtitle: '查看现有规则版本', ready: true, access: canPayroll },
-    { id: 'payroll/payslips', name: '工资单', access: canPayroll },
-    { id: 'payroll/tax', name: '薪税与社保', access: canPayroll },
+    { id: 'payroll/rules', name: '工资项目与方案', subtitle: '工资项目、引用与精确公式', ready: true, access: canPayroll },
+    { id:'payroll/settings', name:'薪酬设置', ready:true, access:c=>canRead(c,'payroll_config')||canPayroll(c) },
+    { id: 'payroll/payslips', name: '工资单', ready:true, access: canPayroll },
+    { id: 'payroll/tax', name: '薪税与社保', ready:true, access: canPayroll },
   ] },
   { id: 'attendance', name: '排班考勤', icon: 'calendar', pages: [
-    { id: 'attendance/schedule', name: '排班工作台', access: c => canRead(c, 'attendance_daily') },
-    { id: 'attendance/daily', name: '考勤日报', access: c => canRead(c, 'attendance_daily') },
-    { id: 'attendance/monthly', name: '考勤月报', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/schedule', ready: true, name: '排班工作台', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/daily', ready: true, name: '考勤日报', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/monthly', ready: true, name: '考勤月报', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/changes', ready: true, name: '调班与借调', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/shifts', ready: true, name: '班次设置', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/imports', ready: true, name: '排班考勤Excel导入', access: c => canRead(c, 'attendance_daily') },
+    { id: 'attendance/versions', ready: true, name: '排班考勤版本记录', access: c => canRead(c, 'attendance_daily') },
     { id: 'attendance/leave', name: '假期台账', subtitle: '额度、申请与核销', ready: true, access: c => !['store_staff', 'station_staff', 'outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(c.profile_code) && canRead(c, 'advanced_leave_manage') },
     { id: 'attendance/leave/settings', name: '假期设置', subtitle: '政策版本与规则发布', ready: true, access: c => !['store_staff', 'station_staff', 'outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(c.profile_code) && (canRead(c, 'advanced_leave_config') || canWrite(c, 'advanced_leave_config')) },
     { id: 'my/leave', name: '我的假期', subtitle: '本人额度与请假申请', ready: true, access: c => canRead(c, 'advanced_leave_self') && !['outsourced_staff', 'vendor_contact', 'outsource_hr'].includes(c.profile_code) },
   ] },
-  { id: 'performance', name: '绩效管理', icon: 'chart', pages: [{ id: 'performance/plans', name: '考核计划', access: c => canRead(c, 'perf_cycle') }, { id: 'performance/bonus', name: '绩效与奖金', access: c => canRead(c, 'perf_cycle') }] },
-  { id: 'people', name: '人事管理', icon: 'people', pages: [
-    { id: 'organization', name: '人事组织架构', subtitle: '组织树与成员穿透', ready: true, access: c => canPeople(c) || canRead(c, 'ledger') },
-    { id: 'people', name: '人事花名册', subtitle: '永久编号与任职历史', ready: true, access: canPeople },
-    { id: 'people/changes', name: '入转调离', access: c => canRead(c, 'employment_manage') },
-    { id: 'people/contracts', name: '人事合同', access: c => canRead(c, 'employment_manage') },
-    { id: 'people/certificates', name: '证件证照', access: canPeople },
-    { id: 'people/items', name: '物品领用', access: canPeople },
+  { id: 'performance', name: '绩效管理', icon: 'chart', pages: [
+    {id:'performance/plans',name:'考核计划',ready:true,access:c=>canRead(c,'perf_cycle')},
+    {id:'performance/ratings',name:'评分与上级复核',ready:true,access:c=>canRead(c,'perf_review')||canRead(c,'perf_self')},
+    {id:'performance/results',name:'绩效成绩与申诉',ready:true,access:c=>canRead(c,'perf_cycle')||canRead(c,'perf_review')},
+    {id:'performance/bonus',name:'绩效与奖金',ready:true,access:c=>canRead(c,'perf_bonus')},
+    {id:'performance/settings',name:'绩效设置',ready:true,access:c=>canConfigureResource(c,'perf_config')},
   ] },
-  { id: 'talent', name: '招聘与培训', icon: 'book', pages: [{ id: 'talent/recruit', name: '招聘管理', access: c => canRead(c, 'requisition') }, { id: 'talent/learning', name: '培训与考试', access: c => canRead(c, 'training_manage') }] },
-  { id: 'services', name: '用工与服务', icon: 'building', pages: [{ id: 'services/vendors', name: '供应商与用工', access: c => canRead(c, 'outsource_ops') }, { id: 'services/dormitory', name: '宿舍管理', access: canPeople }] },
-  { id: 'reports', name: '数据报表', icon: 'chart', pages: [{ id: 'reports/cost', name: '人力成本', access: c => canRead(c, 'report') }] },
+  { id: 'people', name: '人事管理', icon: 'people', pages: [
+    { id: 'organization', name: '人事组织架构', subtitle: '组织树与成员穿透', ready: true, access: c => canPeople(c)||canRead(c,'hr_configuration')||canRead(c,'ledger') },
+    { id: 'people', name: '人事花名册', subtitle: '永久编号与任职历史', ready: true, access: canPeople },
+    { id:'people/changes',name:'入转调离',ready:true,access:c=>canRead(c,'hr_people') },
+    { id:'people/contracts',name:'人事合同',ready:true,access:c=>canRead(c,'hr_contract')||canRead(c,'hr_self') },
+    { id:'people/contract-reminders',name:'合同到期提醒',ready:true,access:c=>canRead(c,'hr_contract')||canRead(c,'hr_self') },
+    { id: 'people/certificates', ready: true, name: '证件证照', access: canPeople },
+    { id: 'people/items', ready: true, name: '物品领用', access: canPeople },
+  ] },
+  { id: 'talent', name: '招聘与培训', icon: 'book', pages: [{ id:'talent/recruit',name:'招聘管理',ready:true,access:c=>canRead(c,'hr_recruitment')||canRead(c,'hr_interview') }, { id: 'talent/learning', name: '培训与考试', access: c => canRead(c, 'training_manage') }] },
+  { id: 'services', name: '用工与服务', icon: 'building', pages: [{ id: 'services/vendors', name: '供应商与用工', access: c => canRead(c, 'outsource_ops') }, { id: 'services/dormitory', ready: true, name: '宿舍管理', access: canPeople }] },
+  { id: 'reports', name: '数据报表', icon: 'chart', pages: [{ id:'reports/cost',name:'人力成本',ready:true,access:c=>canRead(c,'payroll_cost') }] },
   { id: 'personal', name: '我的办理', icon: 'home', bottom: true, pages: [
+    { id: 'my/schedule', ready: true, name: '我的排班与考勤', subtitle: '本人安排、打卡与调班申请', access: c => !!c.has_person && canRead(c, 'attendance_self') },
+    {id:'my/performance',name:'我的绩效',ready:true,access:c=>!!c.has_person&&canRead(c,'perf_self')},
+    { id:'my/payslips',name:'我的工资单',ready:true,access:c=>!!c.has_person&&canRead(c,'payroll_self') },
     { id: 'my/tasks', name: '我的待办', subtitle: '当前分配任务与办理', ready: true, access: canUsePortal },
     { id: 'my/requests', name: '我的申请', subtitle: '发起表单与办理进度', ready: true, access: canUsePortal },
     { id: 'my/alerts', name: '提醒通知', subtitle: '提醒与投递状态', ready: true, access: canUsePortal },

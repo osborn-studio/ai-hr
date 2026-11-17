@@ -98,8 +98,13 @@ export function createDomainPort({ db, broker, operations = {} } = {}) {
     if (typeof op.run !== 'function') throw portError('E_OPERATION_NOT_AVAILABLE', '当前数据端口未提供此能力', 503);
     const run = async transaction => {
       if (op.authorize) await op.authorize(transaction, trusted, input);
-      // Individual domain commands own their atomic idempotency records.
-      return op.run(transaction, input, trusted);
+      // Individual domains own business idempotency. The optional shared
+      // receipt proves only that this exact actor/name/key transaction committed.
+      const result=await op.run(transaction, input, trusted);
+      if(kind==='command'&&typeof transaction.query==='function'&&(await transaction.query("SELECT to_regclass('public.ty_domain_command_completion')IS NOT NULL ok")).rows[0].ok){
+        await transaction.query('INSERT INTO ty_domain_command_completion(actor_id,operation,operation_key)VALUES($1,$2,$3)ON CONFLICT DO NOTHING',[context.userId,name,operationId]);
+      }
+      return result;
     };
     return tx ? run(tx) : withTx(db, run);
   }

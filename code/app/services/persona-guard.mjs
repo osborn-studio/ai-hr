@@ -8,8 +8,8 @@ export async function personaFor(tx,userId) {
   if((await tx.query("SELECT to_regclass('public.ty_operator_binding') IS NOT NULL ok")).rows[0].ok){
     const operator=(await tx.query(`SELECT b.*,a.person_id AS legacy_person_id
       FROM ty_operator_binding b JOIN sys_account a ON a.id=b.account_id
-      WHERE b.account_id=$1 AND b.status='active' AND a.status='active'`,[userId])).rows[0];
-    if(operator)return operator;
+      WHERE b.account_id=$1 AND a.status='active'`,[userId])).rows[0];
+    if(operator){if(operator.status!=='active')throw bizErr('E_TY_FORBIDDEN','操作人员绑定已停用');return operator;}
   }
   if(!(await tx.query("SELECT to_regclass('public.ty_test_account_profile') IS NOT NULL ok")).rows[0].ok)return null;
   return (await tx.query(`SELECT p.*,a.person_id AS legacy_person_id

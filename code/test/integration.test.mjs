@@ -144,7 +144,7 @@ export async function runIntegrationTests({ db }) {
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  const base = process.env.TYHR_BASE_CODE || fileURLToPath(new URL('../../../开发/code/', import.meta.url)), require = createRequire(resolve(base, 'package.json'));
+  const base = process.env.TYHR_BASE_CODE || fileURLToPath(new URL('../', import.meta.url)), require = createRequire(resolve(base, 'package.json'));
   let db;
   if (process.env.DATABASE_URL) { const { Client } = require('pg'); const client = new Client({ connectionString: process.env.DATABASE_URL }); await client.connect(); db = { query: (sql, args) => client.query(sql, args), exec: sql => client.query(sql), close: () => client.end() }; }
   else { const { PGlite } = require('@electric-sql/pglite'), { btree_gist } = require('@electric-sql/pglite/contrib/btree_gist'); db = await PGlite.create({ extensions: { btree_gist } }); }

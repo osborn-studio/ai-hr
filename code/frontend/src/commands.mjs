@@ -13,7 +13,7 @@ export function createCommandJournal({ api, userId, storage, uuid = () => crypto
     try {
       const result = await api.request(`/api/v2/command/${encodeURIComponent(record.operation)}`, { method: 'POST', body: record.input, headers: { 'Idempotency-Key': record.id } });
       memory = memory.filter(r => r.id !== record.id); save(); return { result, operationId: record.id };
-    } catch (error) { record.error = error.message; record.outcome = error.status && error.status < 500 ? 'rejected' : 'unknown'; save(); error.operationId = record.id; throw error; }
+    } catch (error) { record.error = error.message; const rejected=error.status && error.status < 500;record.hadUnknown=record.hadUnknown||record.outcome==='unknown'||!rejected;record.outcome = record.hadUnknown ? 'unknown' : 'rejected'; save(); error.operationId = record.id; throw error; }
   };
   return {
     pending: () => memory.map(r => ({ ...r })),

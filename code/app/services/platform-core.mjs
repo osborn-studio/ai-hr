@@ -25,13 +25,14 @@ export async function rowScope(t,userId,row,write=false){const a=await accessFor
 
 // A matching complete grant supplies action, scope and fields together. Once
 // an account/resource is managed here, revocation never falls back to legacy.
+export function grantAllowsField(grant,key){if(grant.source==='built_in_baseline')return true;const matches=(pattern,k)=>pattern==='*'||pattern===k||k.startsWith(pattern+'.')||pattern.endsWith('.*')&&(k===pattern.slice(0,-2)||k.startsWith(pattern.slice(0,-1)));return!(grant.fields_deny||[]).some(x=>matches(x,key))&&(grant.fields_allow||[]).some(x=>matches(x,key));}
 export async function authorization(t,{userId,resource,action='read',groupId,companyId,departmentId,personId,fields=[],at=null}){
- const a=await accessFor(t,userId),p=a.persona;const group=id(groupId);const account=await one(t,"SELECT id FROM sys_account WHERE id=$1 AND status='active'",[userId]);if(!account)return{allowed:false,denied_reasons:['操作人员已停用'],field_visibility:{}};
- const configResources=new Set(['system_configuration','workflow_manage','integration_manage','advanced_leave_config','ledger']);
+ const a=await accessFor(t,userId),p=a.persona;const group=id(groupId);const account=await one(t,"SELECT id FROM sys_account a WHERE id=$1 AND status='active'AND NOT EXISTS(SELECT 1 FROM ty_operator_binding b WHERE b.account_id=a.id AND b.status<>'active')",[userId]);if(!account)return{allowed:false,denied_reasons:['操作人员已停用'],field_visibility:{}};
+ const configResources=new Set(['system_configuration','workflow_manage','integration_manage','advanced_leave_config','ledger','payroll_config','hr_configuration','perf_config','learning_config']);
  if(p?.profile_code==='config_admin'&&!configResources.has(resource))return{allowed:false,denied_reasons:['配置岗位没有业务数据权限'],field_visibility:{}};
  if(p?.profile_code==='boss'&&!['read','export'].includes(action))return{allowed:false,denied_reasons:['当前岗位为只读'],field_visibility:{}};
- const selfResource=['advanced_leave_self','workflow_self','people_dorm_self','people_cert_self','people_goods_self'].includes(resource);
- const selfBound=selfResource&&a.selfOnly&&p?.person_id&&same(p.group_id,group)&&same(p.person_id,personId);
+ const selfResource=['advanced_leave_self','workflow_self','people_dorm_self','people_cert_self','people_goods_self','attendance_self','payroll_self','hr_self','perf_self','learning_self','outsource_self'].includes(resource);
+ const selfBound=selfResource&&p?.person_id&&same(p.group_id,group)&&same(p.person_id,personId);
  if(!a.group(group)&&!selfBound)return{allowed:false,denied_reasons:['集团范围不符'],field_visibility:{}};
  if(companyId&&!await one(t,'SELECT 1 FROM ty_company WHERE id=$1 AND group_id=$2',[id(companyId),group])||personId&&!await one(t,'SELECT 1 FROM ty_person WHERE id=$1 AND group_id=$2',[id(personId),group])||departmentId&&!await one(t,'SELECT 1 FROM ty_department d JOIN ty_company c ON c.id=d.company_id WHERE d.id=$1 AND c.group_id=$2',[id(departmentId),group]))return{allowed:false,denied_reasons:['目标记录不属于当前集团'],field_visibility:{}};
  const now=at?new Date(at):new Date();if(!Number.isFinite(+now))bad('模拟时点无效');
@@ -67,8 +68,7 @@ export async function authorization(t,{userId,resource,action='read',groupId,com
  AND NOT EXISTS(SELECT 1 FROM ty_auth_role x WHERE x.legacy_role_id=r.id)
  AND NOT EXISTS(SELECT 1 FROM ty_auth_grant x WHERE x.legacy_role_id=r.id))ok`,[userId,resource,verb]))?.ok;
  let scoped=false;
- if(selfBound){scoped=!companyId||!!await one(t,"SELECT 1 FROM ty_employment WHERE person_id=$1 AND company_id=$2 AND group_id=$3 AND status<>'cancelled'",[personId,companyId,group]);}
- else if(hasNative){
+ if(hasNative){
   const baseGrants=a.grants.filter(x=>!x.platform_source_key&&same(x.group_id,group)&& (verb!=='write'||x.can_write));
   const originalAdmin=a.platformAdmin&&functional&&['config_admin','demo'].includes(p?.profile_code);
   if(!companyId)scoped=originalAdmin||baseGrants.some(x=>!x.company_id&&!x.ledger_id);
@@ -77,6 +77,7 @@ export async function authorization(t,{userId,resource,action='read',groupId,com
  else
  if(companyId){const c=await one(t,'SELECT id company_id,group_id,ledger_id FROM ty_company WHERE id=$1',[companyId]);scoped=!!c&&same(c.group_id,group)&&a.row(c,verb==='write');}
  else scoped=a.shared(group,verb==='write')||(configResources.has(resource)&&a.platformAdmin);
+ if(selfBound)scoped||=!companyId||!!await one(t,"SELECT 1 FROM ty_employment WHERE person_id=$1 AND company_id=$2 AND group_id=$3 AND status<>'cancelled'",[personId,companyId,group]);
  return{allowed:functional&&scoped,allowing_grants:functional&&scoped?[{id:null,source:'built_in_baseline',resource,actions:[action]}]:[],field_visibility:Object.fromEntries(fields.map(f=>[f,functional&&scoped])),denied_reasons:functional&&scoped?[]:['当前功能或数据范围不足']};
 }
 export async function requireAccess(t,userId,resource,action,scope={}){const group=scope.group_id??scope.groupId;const d=await authorization(t,{userId,resource,action,groupId:group,companyId:scope.company_id??scope.companyId,personId:scope.person_id??scope.personId,departmentId:scope.department_id??scope.departmentId,fields:scope.fields||[]});if(!d.allowed)deny(d.denied_reasons[0]);return d;}
@@ -90,16 +91,16 @@ export async function command(t,{userId,groupId,operation,operationId,input,exec
  await t.query('INSERT INTO ty_platform_command(actor_id,operation,operation_key,group_id,input_hash,result)VALUES($1,$2,$3,$4,$5,$6::jsonb)',[userId,operation,operationId,groupId,hash(input),JSON.stringify(safe)]);
  return project?project(out):out;
 }
-export async function currentOperator(t,userId){return one(t,`SELECT a.id,a.login,a.display_name,a.status,coalesce(b.revision,1)revision,COALESCE(b.profile_code,p.profile_code)profile_code,
- COALESCE(b.group_id,p.group_id)group_id,COALESCE(b.person_id,p.person_id)person_id,COALESCE(b.company_id,p.company_id)company_id
+export async function currentOperator(t,userId){return one(t,`SELECT a.id,a.login,a.display_name,CASE WHEN a.status<>'active' THEN a.status WHEN b.account_id IS NOT NULL AND b.status<>'active' THEN 'disabled' ELSE a.status END status,coalesce(b.revision,1)revision,CASE WHEN b.account_id IS NOT NULL THEN b.profile_code ELSE p.profile_code END profile_code,
+ CASE WHEN b.account_id IS NOT NULL THEN b.group_id ELSE p.group_id END group_id,CASE WHEN b.account_id IS NOT NULL THEN b.person_id ELSE p.person_id END person_id,CASE WHEN b.account_id IS NOT NULL THEN b.company_id ELSE p.company_id END company_id
  FROM sys_account a LEFT JOIN ty_operator_binding b ON b.account_id=a.id LEFT JOIN ty_test_account_profile p ON p.account_id=a.id WHERE a.id=$1`,[userId]);}
 export async function visibleOperators(t,userId,group,{options=false,companyId=null}={}){
  const a=await accessFor(t,userId);const companies=companyId?await companyDescendants(t,companyId):null;
- const rows=await q(t,`SELECT a.id,a.login,a.display_name,a.status,COALESCE(b.profile_code,p.profile_code)profile_code,
- COALESCE(b.group_id,p.group_id)group_id,COALESCE(b.company_id,p.company_id)company_id,c.name company_name,
+ const rows=await q(t,`SELECT a.id,a.login,a.display_name,a.status,CASE WHEN b.account_id IS NOT NULL THEN b.profile_code ELSE p.profile_code END profile_code,
+ CASE WHEN b.account_id IS NOT NULL THEN b.group_id ELSE p.group_id END group_id,CASE WHEN b.account_id IS NOT NULL THEN b.company_id ELSE p.company_id END company_id,c.name company_name,
  COALESCE(b.revision,1)revision FROM sys_account a LEFT JOIN ty_operator_binding b ON b.account_id=a.id
- LEFT JOIN ty_test_account_profile p ON p.account_id=a.id LEFT JOIN ty_company c ON c.id=COALESCE(b.company_id,p.company_id)
- WHERE COALESCE(b.group_id,p.group_id)=$1 ORDER BY a.display_name,a.id`,[group]);
+ LEFT JOIN ty_test_account_profile p ON p.account_id=a.id LEFT JOIN ty_company c ON c.id=CASE WHEN b.account_id IS NOT NULL THEN b.company_id ELSE p.company_id END
+ WHERE CASE WHEN b.account_id IS NOT NULL THEN b.group_id ELSE p.group_id END=$1 ORDER BY a.display_name,a.id`,[group]);
  const allowed=[];for(const r of rows){if(companies&&r.company_id&&!companies.includes(String(r.company_id)))continue;if(r.company_id){const c=await one(t,'SELECT ledger_id FROM ty_company WHERE id=$1',[r.company_id]);if(!a.row({...r,ledger_id:c?.ledger_id}))continue;}else if(!a.shared(group)&&!options)continue;
  if(options){if(r.status!=='active'||['config_admin','vendor_contact','outsource_hr','outsourced_staff'].includes(r.profile_code))continue;allowed.push({id:r.id,display_name:r.display_name,company_name:r.company_name,role_labels:[r.profile_code],eligible_for_approval:true});}else allowed.push(r);}
  return allowed;
