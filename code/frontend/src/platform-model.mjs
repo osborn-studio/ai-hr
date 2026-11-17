@@ -23,6 +23,23 @@ export const STATE_NAMES = {
 export const list = value => Array.isArray(value) ? value : [];
 export const identity = value => String(value ?? '');
 export const clone = value => JSON.parse(JSON.stringify(value));
+// Published server graphs may omit editor-only names and coordinates. These
+// copies are presentation only; the authoritative graph is never filled in.
+export function workflowCanvasNodes(graph, { roles = [], operators = [] } = {}) {
+  return list(graph?.nodes).map((node, index) => {
+    const typeName = NODE_TYPES.find(([type]) => type === node.type)?.[1] || '流程节点';
+    const named = typeof node.label === 'string' ? node.label.trim() : '';
+    const roleNames = list(node.type === 'notify' ? node.recipient_role_codes ?? node.role_codes : node.role_codes).map(code => roles.find(role => role.code === code)?.name || code);
+    const personNames = list(node.type === 'notify' ? node.recipient_ids ?? node.approver_ids : node.approver_ids).map(id => operators.find(operator => String(operator.id) === String(id))?.name || operators.find(operator => String(operator.id) === String(id))?.display_name).filter(Boolean);
+    const recipientName = [...roleNames, ...personNames].join('、');
+    return { ...node, label: named || (recipientName && ['approval', 'notify'].includes(node.type) ? recipientName + ' · ' + typeName : typeName), x: Number.isFinite(node.x) ? node.x : 80 + index % 4 * 210, y: Number.isFinite(node.y) ? node.y : 80 + Math.floor(index / 4) * 120 };
+  });
+}
+export function operatorBindingLabel(row) {
+  if (typeof row.person_number === 'string' && row.person_number.trim()) return row.person_number;
+  if (!Object.hasOwn(row, 'person_id')) return '未获授权';
+  return row.person_id == null ? '未绑定人员' : '#' + row.person_id;
+}
 export function newKey(prefix, uuid = () => crypto.randomUUID()) { return prefix + '-' + uuid(); }
 export function blankWorkflow(uuid) {
   const start = newKey('start', uuid), approval = newKey('approval', uuid), end = newKey('end', uuid);
