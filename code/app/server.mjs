@@ -192,7 +192,7 @@ const reqIp = (req) => {
   return xff || req.socket?.remoteAddress || null;
 };
 
-export async function createApp({ apiExtension = null, skipDemoSeed = false } = {}) {
+export async function createApp({ apiExtension = null, skipDemoSeed = false, nativeOnly = false } = {}) {
   // ★ 数据目录：默认在内存里（每次启动都是干净库，适合演示与测试）。
   //   设了 PGLITE_DATA_DIR 就持久化到磁盘 —— 否则**重启即丢整个库**，
   //   而那比"会话丢"严重得多：丢的是全部考勤与工资条。
@@ -803,6 +803,9 @@ export async function createApp({ apiExtension = null, skipDemoSeed = false } = 
     try {
       const url = new URL(req.url, 'http://x');
       if(apiExtension?.public&&await apiExtension.public({req,res,url,db,readBody}))return;
+      // The standard cloud frontend is attached before this handler. Historical
+      // standalone assets remain available only through the explicit old entry.
+      if(nativeOnly&&!url.pathname.startsWith('/api/')&&!['/login','/livez','/readyz'].includes(url.pathname))return json(res,404,{error:'E_NATIVE_API_REQUIRED',message:'请使用当前工作台入口'});
 
       // ★ 多帐套：先按 token 前缀选库，再让**整个请求**跑在那个库上。
       //   必须放在最前面 —— 会话表在帐套库里，选错库连"你是谁"都查不出来。
@@ -889,6 +892,7 @@ export async function createApp({ apiExtension = null, skipDemoSeed = false } = 
       // ---- 帐套清单：登录前要能看到"有哪些帐套可选" ----
       // 只回编码与名称，**不回库名** —— 库名是内部拓扑，登录页不需要它。
       if (url.pathname === '/api/ledgers') {
+        if(nativeOnly)return json(res,404,{error:'E_NATIVE_API_REQUIRED',message:'请在当前工作台选择授权范围'});
         if (!registry) {
           return json(res, 200, {
             multi: false,
@@ -1048,6 +1052,12 @@ export async function createApp({ apiExtension = null, skipDemoSeed = false } = 
       // Their trusted actor is derived above, never from request JSON.
       if (apiExtension && (url.pathname.startsWith('/api/v2/') || req.method==='GET'&&url.pathname==='/api/foundation/bootstrap')) {
         if (await apiExtension({ req, res, url, userId: uid, db, readBody, runRead, runWrite })) return;
+      }
+
+      if(nativeOnly){
+        const personalRead=req.method==='GET'&&['/api/me','/api/me/capabilities','/api/me/sessions','/api/me/roles'].includes(url.pathname);
+        const personalWrite=req.method==='POST'&&['/api/me/password','/api/me/logout','/api/me/sessions/revoke'].includes(url.pathname);
+        if(!personalRead&&!personalWrite)return json(res,404,{error:'E_NATIVE_API_REQUIRED',message:'请使用当前工作台的业务接口'});
       }
 
       // Persona restrictions are resolved from the authenticated database account.

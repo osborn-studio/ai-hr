@@ -21,6 +21,9 @@ services:
       TYHR_DATA_VAULT_KEY: "${TYHR_DATA_VAULT_KEY:-}"
       # Opt in only after reviewing and enabling the bounded WASM engine.
       TYHR_SSO_ALLOWED_ORIGINS: "${TYHR_SSO_ALLOWED_ORIGINS:-}"
+      TYHR_NOTIFICATION_ALLOWED_ORIGINS: "${TYHR_NOTIFICATION_ALLOWED_ORIGINS:-}"
+      # Only the explicit empty-demo factory reads this; startup never seeds.
+      TYHR_NOTIFICATION_DEMO_ORIGIN: "${TYHR_NOTIFICATION_DEMO_ORIGIN:-}"
       TYHR_ESIGN_ALLOW_LIVE: "${TYHR_ESIGN_ALLOW_LIVE:-0}"
       TYHR_PAYROLL_SCRIPT_SANDBOX: "${TYHR_PAYROLL_SCRIPT_SANDBOX:-}"
     restart: unless-stopped

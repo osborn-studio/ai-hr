@@ -4,3 +4,5 @@
 .business-form fieldset {border:0;margin:0;padding:0;min-width:0;}
 
 .payroll-configuration .checkbox input{width:15px;min-height:15px;flex:none}.payroll-configuration .checkbox{display:flex;flex-direction:row;align-items:center;gap:9px;margin:10px 0}
+
+.payroll-cost-totals{grid-template-columns:repeat(2,minmax(0,1fr));padding:16px}.payroll-cost-totals .stat-value small{display:inline-block;white-space:nowrap}@media(max-width:480px){.payroll-cost-totals{padding:12px}.payroll-cost-totals .stat-value{font-size:23px}}

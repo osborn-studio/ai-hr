@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 if (!process.env.PGLITE_DATA_DIR && !process.env.DATABASE_URL) throw new Error('请明确指定 PGLITE_DATA_DIR 或 DATABASE_URL');
-const { db, server } = await createApp();
+const { db, server } = await createApp({skipDemoSeed:true});
 try {
   let password = process.env.TYHR_ADMIN_PASSWORD;
   let created = false;

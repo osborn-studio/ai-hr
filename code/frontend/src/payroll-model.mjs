@@ -4,20 +4,22 @@ export const PAYROLL_SYSTEMS=[['CN_PAYROLL','中国内地','CNY'],['HK_PAYROLL',
 export const PAYROLL_CATEGORIES={cash_earnings:'现金应发',reimbursement:'报销往来',personal_deduction:'个人扣项',employee_withholding:'个人代扣',employer_cost:'雇主成本',noncash_shadow:'非现金参考',statistical_base:'基数参考',agency_funds:'代发资金',restricted_payment_funds:'限制付款',procurement_service:'采购服务'};
 export const PAYROLL_STATES={draft:'草稿',calculated:'已预演',reviewed:'已复核',adopted:'已采用',confirmed:'已确认',cancelled:'已取消',approved:'已批准',superseded:'历史版本',not_applicable:'不适用',confirmed_zero:'已核为0',pending_review:'待核',unavailable_not_installed:'未配置',reserved:'已占用',released:'已释放'};
 export const CONFIG_NAMES={systems:'公司算薪体系',relationship:'雇主与发薪主体',profile:'人员工资参数',rulebook:'工资项目方案',wage_calendar:'平均工资日历',formula_proposal:'公式与代码提案',policy:'薪税政策版本',enrollment:'人员薪税资格',opening:'累计期初核定',batch_period:'支付与税供款期间'};
-export const SOURCE_NAMES={salary_profile:'工资档案',time_report:'考勤核定',leave_cash:'假期与加班酬金',people_candidate:'费用与福利',performance_result:'历史绩效奖金',performance_award:'绩效与奖金',training_award:'培训与岗位资格薪酬'};
+export const SOURCE_NAMES={contract_terms:'合同给薪',payroll_calculation:'工资公式',leave_pay:'普通假期给薪',salary_profile:'工资档案',time_report:'考勤核定',leave_cash:'假期与加班酬金',people_candidate:'费用与福利',performance_result:'历史绩效奖金',performance_award:'绩效与奖金',training_award:'培训与岗位资格薪酬'};
 export const systemName=v=>PAYROLL_SYSTEMS.find(x=>x[0]===v)?.[1]||v||'—';
 export const moneyText=(v,state)=>state==='not_applicable'?'不适用':v===undefined?'—':v===null||v===''?'待核':String(v);
 export function payrollQuery(scope,filter={}){return Object.fromEntries(Object.entries({...scope,...filter}).filter(([k,v])=>['group_id','company_id','ledger_id','view','period','system','q','page','page_size','batch_id','kind','person_id','employment_id','domain','status'].includes(k)&&v!==undefined&&v!==null&&v!==''));}
-export function sourceKey(s){return `${s.domain}:${s.id}:${s.employment_id||''}`;}
+export function sourceKey(s){return `${s.domain}:${s.id}:${s.employment_id||''}:${s.component||''}`;}
 export function previewInput(batch,selections,enrollmentIds=[]){
- if(!batch?.id)throw new Error('先选择实际工资批次');const people=new Map(),reports=new Map(),sources=[],seen=new Set();
+ if(!batch?.id)throw new Error('先选择实际工资批次');const people=new Map(),reports=new Map(),parameters=new Map(),sources=[],seen=new Set();
  for(const s of selections){const key=sourceKey(s);if(seen.has(key))continue;seen.add(key);if(!s.id||!s.domain)throw new Error('来源指针不完整');
   if(s.currency&&s.currency!==batch.currency)throw new Error('所选来源币种与批次不一致');
   if(s.company_id&&String(s.company_id)!==String(batch.company_id))throw new Error('请选择本发薪公司的实际来源');
   if(s.domain==='salary_profile'){if(people.has(String(s.employment_id)))throw new Error('同一雇佣只能选一个当前工资档案');people.set(String(s.employment_id),{employment_id:s.employment_id,profile_id:s.id});}
   else if(s.domain==='time_report'){if(reports.has(String(s.employment_id)))throw new Error('同一雇佣月份只能选一个当前考勤版本');reports.set(String(s.employment_id),s.id);}
-  else sources.push({domain:s.domain,id:s.id,...(s.employment_id?{employment_id:s.employment_id}:{})});
+  else if(s.domain==='contract_terms'){if(typeof s.parameter_only!=='boolean')throw new Error('合同采用性质尚未明确，先核定参数或现金');if(s.period&&s.period!==String(batch.period).slice(0,7))throw new Error('合同核定工资月与批次不同');if(s.parameter_only){const e=String(s.employment_id);parameters.set(e,[...(parameters.get(e)||[]),s.id]);}else sources.push({domain:s.domain,id:s.id,...(s.employment_id?{employment_id:s.employment_id}:{})});}
+  else sources.push({domain:s.domain,id:s.id,...(s.component?{component:s.component}:{}),...(s.employment_id?{employment_id:s.employment_id}:{})});
  }
+ for(const[e,ids]of parameters){if(!people.has(e))throw new Error('合同参数须与同一真实雇佣的当前工资档案一起选择');people.get(e).contract_parameters=ids;}
  for(const[e,report]of reports){if(!people.has(e))throw new Error('考勤核定须与同一真实雇佣的工资档案一起选择');people.get(e).report_id=report;}
  if(!people.size&&!sources.length)throw new Error('至少选择一个真实工资来源');
  return{batch_id:batch.id,expected_revision:batch.revision,employments:[...people.values()],sources,statutory:{enrollment_ids:[...new Set(enrollmentIds.map(String))]}};

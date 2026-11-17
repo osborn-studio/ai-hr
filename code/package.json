@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:portal-native && npm run test:learning-native && npm run test:standard-payroll && npm run test:integration-runtime && npm run test:demo-identity && npm run test:frontend && npm run test:workforce-native && npm run test:payroll-finance && npm run test:payroll-scripts && npm run test:time-workflow && npm run test:external-sso && npm run test:notifications && npm run test:recruiting-integration && npm run test:esign-integration && npm run test:sso-preflight && npm run test:notification-options && npm run test:bootstrap-projection && npm run test:payroll-field-projection",
+    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:portal-native && npm run test:learning-native && npm run test:standard-payroll && npm run test:integration-runtime && npm run test:demo-identity && npm run test:frontend && npm run test:workforce-native && npm run test:payroll-finance && npm run test:payroll-scripts && npm run test:time-workflow && npm run test:external-sso && npm run test:notifications && npm run test:recruiting-integration && npm run test:esign-integration && npm run test:sso-preflight && npm run test:notification-options && npm run test:bootstrap-projection && npm run test:payroll-field-projection && npm run test:workflow-delivery && npm run test:leave-payroll && npm run test:contract-payroll",
     "test:db": "node test/run.mjs",
     "test:api": "node test/api.test.mjs",
     "test:scope": "node test/station-scope.mjs",
@@ -64,7 +64,7 @@
     "test:frontend": "npm run test --workspace frontend",
     "test:frontend-ui": "npm run test:ui --workspace frontend",
     "check:frontend": "npm run check --workspace frontend",
-    "test:cloud": "node --test test/cloud-port.test.mjs test/cloud-http.test.mjs",
+    "test:cloud": "node --test test/cloud-port.test.mjs test/cloud-http.test.mjs && node test/cloud-native-boundary.test.mjs",
     "test:leave": "node test/advanced-leave.test.mjs && node --test test/advanced-leave-law.test.mjs && node test/advanced-leave-security.test.mjs && node test/advanced-leave-native.test.mjs",
     "test:platform": "node --test test/human-identity.test.mjs && node test/platform.test.mjs && node test/authz.test.mjs && node test/integration.test.mjs && node test/platform-leave.test.mjs",
     "test:people-services": "node test/people-services.test.mjs && node test/people-services-native.test.mjs",
@@ -90,7 +90,16 @@
     "test:notification-options": "node test/workflow-notification-options.test.mjs",
     "test:complete-demo": "node test/complete-demo.test.mjs",
     "test:bootstrap-projection": "node test/bootstrap-projection.test.mjs",
-    "test:payroll-field-projection": "node test/payroll-field-projection.test.mjs"
+    "test:payroll-field-projection": "node test/payroll-field-projection.test.mjs",
+    "test:workflow-delivery": "node test/notification-integration.test.mjs",
+    "test:workflow-delivery:browser": "node test/notification-browser.mjs",
+    "test:workflow-delivery:seed": "node test/notification-demo-clone.mjs",
+    "test:leave-payroll": "node test/leave-payroll.test.mjs",
+    "test:contract-payroll": "node test/contract-payroll.test.mjs",
+    "test:contract-payroll-ui": "node test/contract-payroll-browser-pg.test.mjs",
+    "test:leave-payroll-ui": "node test/leave-payroll-browser-pg.test.mjs",
+    "test:initialization-pg": "node test/initialization.test.mjs",
+    "test:leave-payroll-demo": "node test/leave-payroll-hk-demo.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",

@@ -1,4 +1,4 @@
-// Independent wholly fictional isolated execution. Partial suite while226 is in private development.
+// Independent wholly invented isolated execution of supplier services, workflows and costs.
 import assert from'node:assert/strict';import{existsSync,readFileSync,readdirSync}from'node:fs';
 const repo=existsSync(new URL('../app/db.mjs',import.meta.url))?new URL('../',import.meta.url):new URL('../../../开发/code/',import.meta.url),{createDb,withTx}=await import(new URL('app/db.mjs',repo));
 import*as wf from'../app/services/workforce-native.mjs';const{saveGrant}=await import(new URL('app/services/platform-authz.mjs',repo));

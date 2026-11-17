@@ -7,7 +7,7 @@
 - 已有可运行的React工作台、单Node服务、PostgreSQL及显式演示帐套；已实现范围与后续工作见[开发进度](docs/development-status.md)。
 - 已统一总体及各专项设计；设计目录中的页面、接口和验收项是开发规格，不能视为已经实现。
 - 原生组织花名册、入转调离与编制、招聘合同、高级排班日报月报、假期、工资来源与两地薪税、绩效评分及奖金、宿舍证照领用已有实际接口和PC/手机页面。系统权限、表单设计器与统一审批已接业务来源；其余模块继续按[全模块清单](docs/module-acceptance.md)开发。
-- 检查点见[供应商用工、工资资金与公式扩展](docs/releases/20261117-workforce-finance-scripts.md)、[排班假期统一审批](docs/releases/20261117-time-workflows.md)、[平台登录与通知门户](docs/releases/20261117-platform-login-notices.md)、[招聘电子签与统一目录](docs/releases/20261117-recruiting-esign-foundation.md)。演示工资确认、站内发布、实际支付与税务申报分别记录；测试政策示例不作为现行法定政策包。
+- 检查点见[供应商用工、工资资金与公式扩展](docs/releases/20261117-workforce-finance-scripts.md)、[排班假期统一审批](docs/releases/20261117-time-workflows.md)、[平台登录与通知门户](docs/releases/20261117-platform-login-notices.md)、[招聘电子签与统一目录](docs/releases/20261117-recruiting-esign-foundation.md)、[给薪来源与部署入口](docs/releases/20261117-payroll-inputs-and-deployment.md)。演示工资确认、站内发布、实际支付与税务申报分别记录；测试政策示例不作为现行法定政策包。
 - 测试组织仅使用天意集团、香香鱼米、大富烤肉及中文假名。客户原件、数据库、口令、环境文件、研究中间件不进入仓库。
 
 ## 设计与开发
@@ -15,6 +15,7 @@
 - [总体功能设计](docs/design/overall.md)：薪酬第一、排班考勤第二、绩效第三，组织人事与权限先行。
 - [设计目录](docs/README.md)：组织、薪酬、排班假期、招聘合同、绩效、培训考试、证照、宿舍、用工协作及集成。
 - [云端架构](docs/cloud-architecture.md)：React构建由一个Node服务托管，数据经领域命令和查询接口访问。
+- [部署与初始化](docs/deployment.md)：空业务库、完整演示库、存量升级及云端适配分别操作。
 - [开发约定](AGENTS.md)：迁移、事务、权限、公式、演示数据和验收边界。
 
 ## 本地启动与检查
