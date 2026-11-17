@@ -56,10 +56,11 @@ async function validateRefs(t,schema,values,group,company,userId){
  }
 }
 async function optionsFor(t,userId,group,company){return visibleOperators(t,userId,group,{options:true,companyId:company});}
-export async function assertDomainApproval(t,{userId,instance}){
+export async function assertDomainApproval(t,{userId,instance,currentRoster=false}){
  if(instance.subject_type==='leave_request'){
   const source=await(await import('./platform-leave.mjs')).leaveRequestSource(t,instance.subject_id);
   await(await import('./advanced-leave.mjs')).accountContext(t,{userId,accountId:source.request.account_id,resource:'advanced_leave_approve',write:true,action:'approve',fields:['status','quantity','facts']});
+  if(currentRoster)await(await import('./leave-roster-source.mjs')).assertRequestRosterCurrent(t,source.request);
  }else if(instance.subject_type==='leave_lifecycle_proposal')await(await import('./leave-lifecycle.mjs')).assertProposalApprovalAccess(t,{userId,id:instance.subject_id});
  else{const a=await businessAdapter(t,instance.subject_type);if(a)await a.approve(t,{userId,instance});}
 }
@@ -197,7 +198,7 @@ export async function decideInstance(t,{userId,input,operationId}){
  const{task,inst}=await taskFor(t,userId,input.task_id);
  return command(t,{userId,groupId:inst.group_id,operation:'instance.decide',operationId,input,project:projectReceipt(t,userId),execute:async()=>{
   revision(task,input.expected_revision);if(task.status!=='pending'||inst.status!=='running'||task.node_id!==inst.current_node)conflict('审批任务已变化');if(typeof input.approve!=='boolean')bad('请选择批准或驳回');const reason=text(input.reason,'审批意见',2);
-  await assertDomainApproval(t,{userId,instance:inst});
+  await assertDomainApproval(t,{userId,instance:inst,currentRoster:input.approve});
   await t.query('UPDATE ty_workflow_task SET status=$2,reason=$3,acted_at=now(),revision=revision+1 WHERE id=$1',[task.id,input.approve?'approved':'rejected',reason]);await log(t,inst,userId,input.approve?'task.approved':'task.rejected',task.node_id,{reason});
   if(!input.approve){await t.query("UPDATE ty_workflow_instance SET status='rejected',finished_at=now(),revision=revision+1,last_approver_id=$2 WHERE id=$1",[inst.id,userId]);await t.query("UPDATE ty_workflow_task SET status='cancelled',revision=revision+1 WHERE instance_id=$1 AND status='pending'",[inst.id]);
    if(inst.subject_type==='leave_request')await(await import('./platform-leave.mjs')).rejectLeaveSubject(t,{userId,instance:inst});
