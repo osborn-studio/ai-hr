@@ -40,7 +40,10 @@ export async function createCloudApp() {
   try {
     await assertCloudMigrations(app.db);
     attachFrontend(app.server, config.frontendDir);
-    return { ...app, config };
+    const worker=await import('./workers/learning-worker.mjs');
+    const stopBackgroundWorkers=worker.startLearningDeadlineWorker(app.db,{onError:error=>console.error('学习期限任务暂不可用',String(error.code||'E_LEARNING_WORKER').replace(/[^A-Z0-9_]/g,'').slice(0,64))});
+    app.server.once('close',()=>Promise.resolve(stopBackgroundWorkers()).catch(()=>{}));
+    return { ...app, config, stopBackgroundWorkers };
   } catch (error) { await app.db.close(); throw error; }
 }
 
@@ -52,7 +55,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     if (closing) return;
     closing = true;
     const timeout = setTimeout(() => process.exit(1), 15000).unref();
-    app.server.close(async () => { await app.db?.close(); clearTimeout(timeout); });
+    app.server.close(async () => { await app.stopBackgroundWorkers?.(); await app.db?.close(); clearTimeout(timeout); });
   };
   process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
 }

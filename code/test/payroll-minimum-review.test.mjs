@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {hongKongMinimumReview} from '../app/services/payroll-minimum-review.mjs';
+const source={id:'30',root_id:'4',head_revision:2,hash:'reviewed-source-hash',values:{worked_minutes:'9600',overtime_minutes:'0'}};
+const classification={coverage:true,classification_verified:true,non_working_cash:'2400',other_work_minutes:'0',evidence_ref:'10月工资分类核对凭据'};
+const calc=(time=source,changes={})=>hongKongMinimumReview({time,period:'2026-10-01',classification:{...classification,...changes}});
+assert.equal(calc().required_total_cash,'9296.00');
+assert.equal(calc({...source,values:{worked_minutes:'9600',overtime_minutes:'120'}}).required_total_cash,'9382.20');
+assert.equal(calc(source,{other_work_minutes:'5'}).required_total_cash,'9299.60');
+assert.throws(()=>calc({...source,values:{worked_minutes:null,overtime_minutes:'0'}}),/未知/);
+assert.throws(()=>calc({...source,values:{worked_minutes:'9600',overtime_minutes:undefined}}),/未知/);
+assert.throws(()=>calc(source,{non_working_cash:null}),/须明确核定/);
+assert.throws(()=>calc(source,{coverage:false}),/月薪制不等于豁免/);
+assert.throws(()=>calc(source,{classification_verified:false}),/分类待核/);
+assert.throws(()=>calc(source,{other_work_minutes:'-1'}),/须明确核定/);
+assert.throws(()=>hongKongMinimumReview({time:source,period:'2025-10-01',classification}),/unavailable/);
+assert.equal(calc().rounding,'ceil_total_to_cent_more_protective_enterprise_choice');
+assert.equal(calc().official_pack,'HK_SMW_20260501');
+console.log(JSON.stringify({suite:'payroll-minimum-review',assertions:12,passed:12,synthetic_only:true,external_calls:0}));

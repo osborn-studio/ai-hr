@@ -1,3 +1,4 @@
+import{subjectDepartment}from'./workflow-scope.mjs';
 import{q,one,same,bad,deny,id,groupFor,requireAccess,authorization,currentOperator,visibleOperators,paging,search}from'./platform-core.mjs';
 import * as authz from './platform-authz.mjs';
 import * as flow from './platform-workflow.mjs';
@@ -7,26 +8,28 @@ const LABELS={read:'查看',write:'维护',create:'新增',update:'修改',delet
 export async function commonWorkspace(t,userId,input){
  const g=await groupFor(t,userId,input.group_id),operator=await currentOperator(t,userId);const companies=[];
  for(const c of await q(t,'SELECT id,group_id,ledger_id,name,parent_company_id,org_level FROM ty_company WHERE group_id=$1 ORDER BY id',[g.id]))if(g.access.row({...c,company_id:c.id}))companies.push(c);
- const scope={groupId:g.id,companyId:input.company_id||operator.company_id||null,personId:operator.person_id};
+ const scope={groupId:g.id,companyId:input.company_id||operator.company_id||null,personId:operator.person_id};scope.departmentId=await subjectDepartment(t,scope);
  const can=async(resource,action)=>(await authorization(t,{userId,resource,action,...scope})).allowed;
  const config=await can('system_configuration','write'),design=await can('workflow_manage','write'),publish=await can('workflow_manage','publish'),readDesign=await can('workflow_manage','read');
  const capabilities={can_manage_operators:config,can_manage_roles:config,can_manage_grants:config,can_design_forms:design,can_publish_forms:publish,can_design_workflows:design,can_publish_workflows:publish,can_manage_integrations:await can('integration_manage','write'),can_submit:await can('workflow_self','submit'),can_approve:await can('workflow_self','approve'),can_execute:operator.profile_code!=='config_admin'&&await can('workflow_manage','execute'),can_simulate:config,can_pick_approvers:readDesign};
  let resources=[];if(config)resources=await q(t,'SELECT resource_code code,label FROM sys_perm_resource ORDER BY label,resource_code');
+ capabilities.can_request_transfer=!!operator.person_id&&operator.profile_code!=='config_admin'&&(await one(t,"SELECT to_regclass('public.ty_portal_read')IS NOT NULL ok")).ok&&capabilities.can_submit;
+ capabilities.can_request_service=capabilities.can_request_transfer&&(await one(t,"SELECT to_regclass('public.ty_personal_service_request')IS NOT NULL ok")).ok;
  capabilities.can_upload_attachments=operator.profile_code!=='config_admin'&&(await one(t,"SELECT to_regclass('public.ty_pf_attachment')IS NOT NULL ok")).ok&&capabilities.can_submit;
  const catalogue=await resourceFields(t,g.id);
  return{group_id:g.id,current_operator:operator,companies,resource_catalogue:resources.map(r=>({...r,actions:authz.ACTIONS.map(code=>({code,label:LABELS[code]})),fields:catalogue.byResource[r.code]||catalogue.defaultFields})),fields_catalogue:catalogue.all,capabilities,as_of:new Date().toISOString(),unavailable_modules:[]};
 }
 async function designRows(t,userId,table,group,company){const out=[];for(const r of await q(t,`SELECT * FROM ${table} WHERE group_id=$1 ORDER BY code,version DESC`,[group])){if(company&&r.company_id&&!same(company,r.company_id))continue;if((await authorization(t,{userId,resource:'workflow_manage',action:'read',groupId:group,companyId:r.company_id||company})).allowed)out.push(r);}return out;}
 async function availableForms(t,userId,group,company,businessType=null){const out=[],operator=await currentOperator(t,userId);for(const f of await q(t,"SELECT f.* FROM ty_form_definition f JOIN ty_workflow_definition w ON w.id=f.workflow_id WHERE f.group_id=$1 AND f.status='published'AND w.status='published' ORDER BY f.name,f.version DESC",[group])){if(businessType&&f.business_type!==businessType)continue;if(f.company_id&&!same(f.company_id,company))continue;if((await authorization(t,{userId,resource:'workflow_self',action:'submit',groupId:group,companyId:company,personId:operator?.person_id})).allowed)out.push(f);}return out;}
-async function instances(t,userId,group,{own=false,company=null}={}){const out=[];for(const r of await q(t,'SELECT id,company_id FROM ty_workflow_instance WHERE group_id=$1 AND($2::bigint IS NULL OR applicant_id=$2)ORDER BY id DESC',[group,own?userId:null])){if(company&&!same(company,r.company_id))continue;try{out.push(await flow.projectInstance(t,userId,r.id));}catch(e){if(!['E_TY_FORBIDDEN','E_TY_NOT_FOUND'].includes(e.code))throw e;}}return out;}
-async function tasks(t,userId,group,company,canExecute){const out=[];
- const rows=await q(t,`SELECT k.*,i.group_id,i.company_id,i.person_id,i.title,i.status instance_status,i.business_state,i.revision instance_revision,a.display_name applicant_name FROM ty_workflow_task k JOIN ty_workflow_instance i ON i.id=k.instance_id JOIN sys_account a ON a.id=i.applicant_id WHERE i.group_id=$1 AND k.approver_id=$2 ORDER BY k.id DESC`,[group,userId]);
- for(const r of rows){if(company&&!same(company,r.company_id))continue;if(!(await authorization(t,{userId,resource:'workflow_self',action:'read',groupId:group,companyId:r.company_id})).allowed)continue;
-  const permitted=(await authorization(t,{userId,resource:'workflow_self',action:'approve',groupId:group,companyId:r.company_id})).allowed;
-  if(!(await authorization(t,{userId,resource:'workflow_self',action:'read',groupId:group,companyId:r.company_id,personId:r.person_id,fields:['title']})).allowed)r.title='审批事项';
-  if(!(await authorization(t,{userId,resource:'workflow_self',action:'read',groupId:group,companyId:r.company_id,personId:r.person_id,fields:['applicant_name']})).allowed)delete r.applicant_name;
+async function instances(t,userId,group,{own=false,company=null}={}){const out=[],companyIds=company?await(await import('./foundation.mjs')).companyDescendants(t,company):null;for(const r of await q(t,'SELECT id,company_id FROM ty_workflow_instance WHERE group_id=$1 AND($2::bigint IS NULL OR applicant_id=$2)ORDER BY id DESC',[group,own?userId:null])){if(companyIds&&!companyIds.includes(String(r.company_id)))continue;try{out.push(await flow.projectInstance(t,userId,r.id));}catch(e){if(!['E_TY_FORBIDDEN','E_TY_NOT_FOUND'].includes(e.code))throw e;}}return out;}
+async function tasks(t,userId,group,company,canExecute){const out=[],companyIds=company?await(await import('./foundation.mjs')).companyDescendants(t,company):null,operator=await currentOperator(t,userId);
+ const rows=await q(t,`SELECT k.*,i.group_id,i.company_id,i.person_id,(to_jsonb(i)->>'department_id')::bigint department_id,i.title,i.status instance_status,i.business_state,i.revision instance_revision,a.display_name applicant_name FROM ty_workflow_task k JOIN ty_workflow_instance i ON i.id=k.instance_id JOIN sys_account a ON a.id=i.applicant_id WHERE i.group_id=$1 AND k.approver_id=$2 ORDER BY k.id DESC`,[group,userId]);
+ for(const r of rows){if(companyIds&&!companyIds.includes(String(r.company_id)))continue;if(!(await authorization(t,{userId,resource:'workflow_self',action:'read',groupId:group,companyId:r.company_id,personId:r.person_id,departmentId:r.department_id})).allowed)continue;
+  const permitted=(await authorization(t,{userId,resource:'workflow_self',action:'approve',groupId:group,companyId:r.company_id,personId:r.person_id,departmentId:r.department_id})).allowed;
+  if(!(await authorization(t,{userId,resource:'workflow_self',action:'read',groupId:group,companyId:r.company_id,personId:r.person_id,departmentId:r.department_id,fields:['title']})).allowed)r.title='审批事项';
+  if(!(await authorization(t,{userId,resource:'workflow_self',action:'read',groupId:group,companyId:r.company_id,personId:r.person_id,departmentId:r.department_id,fields:['applicant_name']})).allowed)delete r.applicant_name;
   const actions=r.status==='pending'&&r.instance_status==='running'&&permitted?[{code:'approve',label:'批准'},{code:'reject',label:'驳回'},{code:'transfer',label:'转交'}]:[];
-  if(canExecute&&r.instance_status==='approved'&&r.business_state==='pending')actions.push({code:'execute',label:'执行业务'});out.push({...r,actions});
+  if(operator.profile_code!=='config_admin'&&r.instance_status==='approved'&&r.business_state==='pending'&&(await authorization(t,{userId,resource:'workflow_manage',action:'execute',groupId:group,companyId:r.company_id,personId:r.person_id,departmentId:r.department_id})).allowed)actions.push({code:'execute',label:'执行业务'});out.push({...r,actions});
  }return out;
 }
 export async function queryWorkspace(t,{userId,input}){
@@ -53,7 +56,7 @@ export async function queryWorkspace(t,{userId,input}){
   else if(view==='forms'){rows=await availableForms(t,userId,g,company,input.business_type||null);alias='forms';}
   else if(view==='tasks'){rows=await tasks(t,userId,g,company,base.capabilities.can_execute);alias='tasks';}else bad('流程工作区视图无效');
  }else if(kind==='portal'){
-  await requireAccess(t,userId,'workflow_self','read',{group_id:g,company_id:company,person_id:base.current_operator.person_id});const view=input.view||'tasks';
+  const portalScoped=(await one(t,"SELECT to_regclass('public.ty_portal_read')IS NOT NULL ok")).ok;if(!portalScoped)await requireAccess(t,userId,'workflow_self','read',{group_id:g,company_id:company,person_id:base.current_operator.person_id});const view=input.view||'tasks';
   if(view==='detail'){
    const detail=await flow.projectInstance(t,userId,id(input.id));if(!same(detail.group_id,g))deny('事项不属于当前集团');rows=[detail];alias='instances';
    base.logs=detail.logs;
@@ -61,6 +64,7 @@ export async function queryWorkspace(t,{userId,input}){
   else if(view==='forms'){rows=await availableForms(t,userId,g,company,input.business_type||null);alias='forms';}
   else if(view==='tasks'){rows=await tasks(t,userId,g,company,base.capabilities.can_execute);alias='tasks';}
   else if(view==='requests'){rows=await instances(t,userId,g,{own:true,company});alias='instances';}
+  else if(view==='alerts'&&(await one(t,"SELECT to_regclass('public.ty_portal_read')IS NOT NULL ok")).ok){const alerts=await(await import('./portal-notices.mjs')).listNotices(t,{userId,input:{group_id:g,company_id:company}});rows=alerts.rows;base.unavailable_notice_domains=alerts.unavailable_domains;alias='alerts';}
   else if(view==='alerts'){for(const c of await q(t,'SELECT c.instance_id,c.seen_at FROM ty_workflow_copy c JOIN ty_workflow_instance i ON i.id=c.instance_id WHERE c.account_id=$1 AND i.group_id=$2 ORDER BY i.id DESC',[userId,g])){try{const i=await flow.projectInstance(t,userId,c.instance_id);if(company&&!same(company,i.company_id))continue;rows.push({id:i.id,title:i.title,channel:'站内抄送',issued_state:'recorded',read_state:c.seen_at?'read':'unread',business_status:i.status,seen_at:c.seen_at});}catch(e){if(!['E_TY_FORBIDDEN','E_TY_NOT_FOUND'].includes(e.code))throw e;}}alias='alerts';}else bad('个人门户视图无效');
   base.forms=await availableForms(t,userId,g,company,input.business_type||null);
  }else bad('工作区类型无效');

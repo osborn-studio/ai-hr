@@ -1,8 +1,9 @@
 // Verified statutory payroll parameters. No credentials, rates or tax eligibility defaults.
 import {one,q,id,text,bad,deny,conflict,paging,search,revision} from './platform-core.mjs';
+import{companyDescendants,ledgerDescendants}from'./foundation.mjs';
 import {sameHuman,humanIsPerson} from './human-identity.mjs';
 import {payrollInternals as H} from './payroll-source.mjs';
-import {amount,plus,minus,compare,fraction} from '../payroll-calculations.mjs';
+import {amount,plus,minus,times,compare,fraction} from '../payroll-calculations.mjs';
 import {exactDecimal} from '../leave-calculations.mjs';
 import {cnCumulativeIIT,cnSocialContribution,hkMpfRegular} from '../payroll-statutory-calculations.mjs';
 const num=v=>{H.numeric(v);if(compare(v,'0')<0)bad('薪税参数不能为负');return v;};
@@ -22,7 +23,7 @@ async function validate(t,input){const d=input.data;if(!d||typeof d!=='object'||
    for(const code of d.deductible_codes)if(!Object.values(catalogPairs).flat().filter(Boolean).filter(c=>c.startsWith('CN_EMP_')).includes(code))bad('个人税前扣除不能混入雇主成本或未知项目');
   }else{
    for(const k of ['lower','upper','employee_rate','employer_rate'])num(d[k]);
-   if(d.type==='CN_SOCIAL'){
+   if(d.type==='CN_SOCIAL'){if(d.rounding_scale!==undefined&&d.rounding_scale!==2)bad('所选地方整元供款适配尚未安装，不能忽略舍入参数继续按分计算');
     if(input.system!=='CN_PAYROLL'||!Object.values(catalogPairs).some(([a,b])=>a===d.employee_code&&b===d.employer_code))bad('社保公积金须使用已知个人/雇主原子配对，不混岗位工资');
     cnSocialContribution({declaredBase:'0',lower:d.lower,upper:d.upper,employeeRate:d.employee_rate,employerRate:d.employer_rate,employeeApplicable:true,employerApplicable:true,employeeArrears:'0',employerArrears:'0',alreadyEmployeeTarget:'0',alreadyEmployerTarget:'0'});
    }else{
@@ -61,12 +62,12 @@ export async function approveStatutoryConfiguration(t,{userId,input,operationId}
  const c=await get(t,input.id);await H.access(t,userId,c.person_id?'payroll_confirm':'payroll_config','approve',c,['data','status']);
  return H.cmd(t,{userId,operationId,operation:'statutory.config.approve',input,execute:async()=>{const r=await one(t,'SELECT * FROM ty_pay_stat_config WHERE id=$1 FOR UPDATE',[c.id]);if(await sameHuman(t,r.created_by,userId)||await humanIsPerson(t,userId,r.group_id,r.person_id))deny('薪税基线/资格不能由同一人员或受益人核准');if(r.status!=='draft')conflict('薪税版本已处理');revision(r,input.expected_revision);await validate(t,r);await t.query("UPDATE ty_pay_stat_config SET status='approved',approved_by=$2,approved_at=clock_timestamp()WHERE id=$1",[r.id,userId]);return{config_id:r.id};},receipt:async v=>({config:await H.project(t,userId,res(c),c,await get(t,v.config_id))})});
 }
-export async function statutoryWorkspace(t,{userId,input}){const rows=await q(t,'SELECT * FROM ty_pay_stat_config WHERE group_id=$1 ORDER BY id DESC',[id(input.group_id)]),out=[];for(const r of rows){if(input.kind&&input.kind!==r.kind||input.person_id&&input.person_id!=r.person_id||input.company_id&&input.company_id!=r.company_id)continue;const v=await H.project(t,userId,res(r),r,r);if(v)out.push(v);}return paging(search(out,input.q,['stable_key','kind','system']),input);}
+export async function statutoryWorkspace(t,{userId,input}){const rows=await q(t,'SELECT cfg.*,c.name company_name,c.ledger_id FROM ty_pay_stat_config cfg JOIN ty_company c ON c.id=cfg.company_id WHERE cfg.group_id=$1 ORDER BY cfg.id DESC',[id(input.group_id)]),out=[],companies=input.company_id?await companyDescendants(t,id(input.company_id)):null,ledgers=input.ledger_id?await ledgerDescendants(t,id(input.ledger_id)):null;for(const r of rows){if(input.system&&r.system!==input.system||ledgers&&!ledgers.includes(String(r.ledger_id))||input.kind&&input.kind!==r.kind||input.person_id&&input.person_id!=r.person_id||companies&&!companies.includes(String(r.company_id)))continue;const v=await H.project(t,userId,res(r),r,r);if(v)out.push(v);}return paging(search(out,input.q,['stable_key','kind','system']),input);}
 function independent(c,component){const p=c.policy.data,o=c.opening.data,v=c.period_parameters,typ=c.type;
  if(typ==='CN_IIT'){const x=cnCumulativeIIT({incomeBefore:o.income,deductibleBefore:o.deductible,specialBefore:o.special,otherBefore:o.other,basicBefore:o.basic,taxWithheldBefore:o.tax_recognized,currentIncomeDelta:c.native_income,currentDeductibleDelta:c.native_deductible,currentSpecialDelta:c.native_special,currentOtherDelta:c.native_other,basicForPeriod:c.native_basic,basicAlreadyRecognized:'0',brackets:p.brackets});return{target:x.taxTarget,initial:o.tax_recognized,result:x};}
  const args={lower:p.lower,upper:p.upper,employeeRate:p.employee_rate,employerRate:p.employer_rate,employeeArrears:v.employee_arrears,employerArrears:v.employer_arrears,alreadyEmployeeTarget:o.employee_target,alreadyEmployerTarget:o.employer_target};
  const x=typ==='CN_SOCIAL'?cnSocialContribution({...args,declaredBase:v.declared_base,employeeApplicable:v.employee_eligible,employerApplicable:v.employer_eligible}):hkMpfRegular({...args,schemeType:p.scheme_type,periodType:p.period_type,relevantIncomeCumulative:exactDecimal(fraction(plus(o.income,c.native_income)),12),employeeCap:p.employee_cap,employerCap:p.employer_cap,employeeEligible:v.employee_eligible,employerEligible:v.employer_eligible});
- const side=component===p.employee_code?'employee':'employer';return{target:x[side].target,initial:o[side+'_target'],state:x[side].state,result:x};
+ const side=component===p.employee_code?'employee':'employer';return{target:x[side].target,initial:o[side+'_target'],state:x[side].state,requiresReversalReview:x[side].requiresReversalReview===true,result:x};
 }
 export async function buildStatutoryLines(t,{userId,batch:b,lines,selections}){
  if(!Array.isArray(selections.enrollment_ids)||!selections.enrollment_ids.length||selections.enrollment_ids.length>10000)bad('原生法定核算须选择真实已核人员资格，不猜税率或参保基数');
@@ -75,11 +76,14 @@ export async function buildStatutoryLines(t,{userId,batch:b,lines,selections}){
  enrollments.sort((a,z)=>Number(a.p.data.type==='CN_IIT')-Number(z.p.data.type==='CN_IIT'));
  for(const{n,p}of enrollments){const eids=[...new Set(lines.filter(l=>l.scope.person_id==n.person_id&&l.scope.employment_id).map(l=>l.scope.employment_id))];if(!eids.length)bad('法定资格未对应本批实际工资受益人');const e=await H.employment(t,eids[0]);await H.sourceScope(t,userId,b,e);for(const c of[n,p,await get(t,n.data.opening_id)])await H.access(t,userId,res(c),'read',c,['data','sources','amount']);
   const raw=await one(t,'SELECT fn_ty_pay_stat_context($1,$2,$3,$4::jsonb)c',[b.id,e.id,n.id,JSON.stringify(p.data.type==='CN_IIT'?[...lines,...result.filter(l=>l.code!=='CN_IIT_WITHHOLD')]:lines)]),c=raw.c;
+  if(c.type==='CN_SOCIAL'&&p.data.employer_code==='CN_ER_HOUSING_FUND'&&p.data.rounding_scale!==0&&p.data.policy_values!=='wholly_fictional_not_current_legal_baseline'){
+   const local=await one(t,'SELECT address FROM ty_company WHERE id=$1',[p.company_id]);if(String(local?.address||'').includes('上海')){const v=c.period_parameters,base=compare(v.declared_base,p.data.lower)<0?p.data.lower:compare(v.declared_base,p.data.upper)>0?p.data.upper:v.declared_base;for(const side of ['employee','employer'])if(v[side+'_eligible']===true){const exact=times(base,p.data[side+'_rate']);if(compare(amount(exact),amount(exactDecimal(fraction(exact),0)))!==0)bad('上海住房公积金须按个人和单位各自整元核定，当前按分参数会产生差异；请使用已安装的整元政策版本，不得静默按分算');}}
+  }
   for(const w of await q(t,"SELECT DISTINCT r.group_id,r.company_id,r.person_id FROM ty_pay_row r JOIN ty_pay_batch b ON b.id=r.batch_id WHERE r.group_id=$1 AND r.person_id=$2 AND b.status='confirmed'AND(CASE WHEN $3='CN_IIT'THEN b.tax_subject_key ELSE b.contribution_subject_key END)=$4",[b.group_id,e.person_id,c.type,c.subject_key]))await H.access(t,userId,'payroll_sources','read',w,['sources','amount']);
   for(const component of c.type==='CN_IIT'?['CN_IIT_WITHHOLD']:[p.data.employee_code,p.data.employer_code].filter(Boolean)){
    const key=`stat:${b.group_id}:${e.person_id}:${c.subject_key}:${c.legal_employer_key}:${component}:${c.type==='CN_IIT'?c.period.slice(0,4)+'-01-01':c.period}`;if(seen.has(key))bad('同一参保或纳税身份重复选择，不能各门店重复应用上限');seen.add(key);
    const pure=independent(c,component),sql=(await one(t,'SELECT fn_ty_pay_stat_math($1::jsonb,$2)m',[JSON.stringify(c),component])).m;
-   if(pure.target===null){if(sql.state!=='not_applicable')bad('资格不适用口径冲突');continue;}
+   if(pure.target===null){if(sql.state!=='not_applicable')bad('资格不适用口径冲突');const priorRoot=await one(t,'SELECT current_target FROM ty_pay_stat_root WHERE global_key=$1 FOR UPDATE',[key]);if(pure.requiresReversalReview||priorRoot&&compare(priorRoot.current_target,'0')!==0)bad('本期供款已有已确认目标；资格改为不适用须独立核定反向调整，不能跳过留下旧额或静默清零');continue;}
    if(compare(pure.target,sql.target)!==0)bad('法定数学双重核验不一致，禁止入薪');
    await t.query('INSERT INTO ty_pay_stat_root(group_id,person_id,subject_key,legal_employer_key,plan_key,component,period,global_key,opening_id,current_target)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)ON CONFLICT(global_key)DO NOTHING',[b.group_id,e.person_id,c.subject_key,c.legal_employer_key,c.plan_key,component,c.type==='CN_IIT'?c.period.slice(0,4)+'-01-01':c.period,key,c.opening.id,pure.initial]);
    const root=await one(t,'SELECT * FROM ty_pay_stat_root WHERE global_key=$1 FOR UPDATE',[key]);if(root.plan_key!==c.plan_key||root.opening_id!=c.opening.id||root.latest_period&&H.date(root.latest_period)>c.period)bad('累计期初已采用或后续期间已核，不能换期初/倒回月份重置');

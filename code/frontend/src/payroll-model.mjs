@@ -7,7 +7,7 @@ export const CONFIG_NAMES={systems:'公司算薪体系',relationship:'雇主与�
 export const SOURCE_NAMES={salary_profile:'工资档案',time_report:'考勤核定',leave_cash:'假期与加班酬金',people_candidate:'费用与福利',performance_result:'历史绩效奖金',performance_award:'绩效与奖金',training_award:'培训与岗位资格薪酬'};
 export const systemName=v=>PAYROLL_SYSTEMS.find(x=>x[0]===v)?.[1]||v||'—';
 export const moneyText=(v,state)=>state==='not_applicable'?'不适用':v===undefined?'—':v===null||v===''?'待核':String(v);
-export function payrollQuery(scope,filter={}){return Object.fromEntries(Object.entries({...scope,...filter}).filter(([k,v])=>['group_id','company_id','ledger_id','view','period','system','q','page','page_size','batch_id','kind','person_id','status'].includes(k)&&v!==undefined&&v!==null&&v!==''));}
+export function payrollQuery(scope,filter={}){return Object.fromEntries(Object.entries({...scope,...filter}).filter(([k,v])=>['group_id','company_id','ledger_id','view','period','system','q','page','page_size','batch_id','kind','person_id','employment_id','domain','status'].includes(k)&&v!==undefined&&v!==null&&v!==''));}
 export function sourceKey(s){return `${s.domain}:${s.id}:${s.employment_id||''}`;}
 export function previewInput(batch,selections,enrollmentIds=[]){
  if(!batch?.id)throw new Error('先选择实际工资批次');const people=new Map(),reports=new Map(),sources=[],seen=new Set();
@@ -32,4 +32,9 @@ export function parseCalendarCsv(source){const rows=[];let row=[],cell='',quoted
 export const autoStatutoryCode=code=>/^CN_(IIT_WITHHOLD|EMP_(PENSION|MEDICAL|UNEMPLOYMENT|HOUSING_FUND)|ER_(PENSION|MEDICAL|UNEMPLOYMENT|WORK_INJURY|MATERNITY|HOUSING_FUND))$/.test(code)||/^HK_(EMP|ER)_MPF_MANDATORY$/.test(code);
 
 export const fictionalPolicyExample=row=>row?.policy_values==='wholly_fictional_not_current_legal_baseline'||row?.data?.policy_values==='wholly_fictional_not_current_legal_baseline'||String(row?.stable_key||'').startsWith('TY-NATIVE-PAYROLL-DEMO-202610-V1:')||/^全虚构10月.*工资（原生）$/.test(row?.label||'');
-export const FICTIONAL_POLICY_NOTICE='虚构政策示例，不代表现行法规。本组历史工资使用独立编造的税率、供款比例和最低保障参数；正式核算须选择按生效日核准的标准政策，并核实人员资格与工时。';
+export const FICTIONAL_POLICY_NOTICE='演示参数方案，非现行法规标准。正式核算请使用按生效日核准的标准政策，并核实人员资格与工时。';
+
+export const payrollDisplayLabel=row=>/^全虚构10月.*工资（原生）$/.test(row?.label||'')?`${String(row.period||'2026-10').slice(0,7)} · ${row.company_name||'工资核算'}${row.company_name?'工资':''}`:row?.label||'';
+
+export const standardPolicyExample=row=>row?.policy_values==='official_parameters_with_reviewed_demo_qualifications'||row?.data?.policy_values==='official_parameters_with_reviewed_demo_qualifications';
+export const STANDARD_POLICY_NOTICE='演示帐套：法定参数按地区与生效日期核准；人员资格、单位核定表和业务金额为演示业务凭据。工资确认不等于付款、申报或缴费。';

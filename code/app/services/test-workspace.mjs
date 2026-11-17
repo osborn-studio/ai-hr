@@ -8,11 +8,13 @@ import * as payroll from './customer-payroll.mjs';
 import * as bridge from './foundation-bridge.mjs';
 import * as roster from './roster-write.mjs';
 import * as training from './training.mjs';
+import{demoPersonName}from'./demo-person-names.mjs';
 
 export const RESOURCES=['ledger','perf_cycle','payroll_run','payroll_slips_read_all'];
 const CODE='TY-TEST';
 const VERSION='TY-TEST-v3';
 const PEOPLE_COUNT=62;
+const STORE_PLACES={A:['静安南京西路','徐汇田林','黄浦淮海路','浦东陆家嘴','长宁中山公园','虹口北外滩','普陀长寿路','杨浦五角场','闵行虹桥','宝山大华'],B:['铜锣湾','湾仔','中环','尖沙咀','旺角','观塘','沙田','荃湾','将军澳','元朗']};
 const MANAGER_ORDINALS=[61,62];
 const PERFORMANCE_MANAGER_ORDINALS=[33,61,62];
 const AGGREGATIONS=['floor_average_months','average_score_last_grade'];
@@ -21,7 +23,7 @@ const q=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows;
 const fail=m=>{throw bizErr('E_TY_CONFLICT',m);};
 
 export async function seed(tx,{userId,input}) {
-  if(input?.confirm_synthetic!==true)throw bizErr('E_TY_ARGUMENT','请明确confirm_synthetic，确认仅创建全虚构测试帐套');
+  if(input?.confirm_synthetic!==true)throw bizErr('E_TY_ARGUMENT','请明确confirm_synthetic，确认仅创建演示帐套');
   const selected=input.selected_aggregation||'floor_average_months';
   if(!AGGREGATIONS.includes(selected))throw bizErr('E_TY_ARGUMENT','请选择支持的绩效聚合算法');
   const selectedByRegion={CN:input.selected_aggregations?.CN||selected,HK:input.selected_aggregations?.HK||selected};
@@ -38,35 +40,35 @@ export async function seed(tx,{userId,input}) {
   if(existing) {
     const receipt=(await q(tx,`SELECT after_data FROM ty_audit WHERE entity_kind='test_workspace' AND entity_id=$1 AND action='seed'
       ORDER BY id DESC LIMIT 1`,[existing.id]))[0]?.after_data;
-    return receipt?{...receipt,seeded:false,already_exists:true,notice:'完整虚构测试帐套已存在，未覆盖任何业务记录。'}:
+    return receipt?{...receipt,seeded:false,already_exists:true,notice:'完整演示帐套已存在，未覆盖任何业务记录。'}:
       {seeded:false,already_exists:true,complete:false,group_id:existing.id,notice:'TY-TEST编码已存在，未覆盖；没有找到本服务的完整初始化回执。'};
   }
   const add=async(collection,data)=>(await foundation.save(tx,{userId,collection,input:data})).row;
   const group=await add('groups',{code:CODE,name:'天意集团'}),gid=group.id;
   const brandA=await add('brands',{group_id:gid,code:'SYN-A',name:'香香鱼米',region_code:'CN',currency_code:'CNY'});
   const brandB=await add('brands',{group_id:gid,code:'SYN-B',name:'大富烤肉',region_code:'HK',currency_code:'HKD'});
-  const ledgerA=await add('ledgers',{group_id:gid,brand_id:brandA.id,scope_mode:'brand',code:'SYN-LEDGER-A',name:'香香鱼米测试帐套',region_code:'CN',currency_code:'CNY'});
-  const ledgerB=await add('ledgers',{group_id:gid,brand_id:brandB.id,scope_mode:'brand',code:'SYN-LEDGER-B',name:'大富烤肉测试帐套',region_code:'HK',currency_code:'HKD'});
-  const ledgerHQ=await add('ledgers',{group_id:gid,scope_mode:'group',code:'SYN-LEDGER-HQ',name:'天意集团总部测试帐套',region_code:'CN',currency_code:'CNY'});
+  const ledgerA=await add('ledgers',{group_id:gid,brand_id:brandA.id,scope_mode:'brand',code:'SYN-LEDGER-A',name:'香香鱼米品牌帐',region_code:'CN',currency_code:'CNY'});
+  const ledgerB=await add('ledgers',{group_id:gid,brand_id:brandB.id,scope_mode:'brand',code:'SYN-LEDGER-B',name:'大富烤肉品牌帐',region_code:'HK',currency_code:'HKD'});
+  const ledgerHQ=await add('ledgers',{group_id:gid,scope_mode:'group',code:'SYN-LEDGER-HQ',name:'天意集团帐',region_code:'CN',currency_code:'CNY'});
   const companySpecs=[];
   for(const [brand,ledger,key] of [[brandA,ledgerA,'A'],[brandB,ledgerB,'B']])for(let n=1;n<=10;n++)companySpecs.push({
-    code:`SYN-${key}-${String(n).padStart(2,'0')}`,name:`${brand.name}${String(n).padStart(2,'0')}店`,ledger,brand,kind:'store',storeNumber:n,
+    code:`SYN-${key}-${String(n).padStart(2,'0')}`,name:`${brand.name}·${STORE_PLACES[key][n-1]}店`,ledger,brand,kind:'store',storeNumber:n,
   });
   companySpecs.push({code:'SYN-HQ',name:'天意集团总部',ledger:ledgerHQ,brand:null,kind:'headquarters'});
   const companies=[];
   for(const s of companySpecs)companies.push(await add('companies',{group_id:gid,ledger_id:s.ledger.id,brand_id:s.brand?.id||null,code:s.code,name:s.name,company_kind:s.kind,
-    address:s.kind==='headquarters'?'内地·全虚构测试总部':`${s.brand.id===brandB.id?'香港':'内地'}·全虚构演示广场${String(s.storeNumber).padStart(2,'0')}`}));
-  const jobs=[];for(const [code,name] of [['SYN-SERVICE','演示服务岗'],['SYN-CHEF','演示料理岗'],['SYN-MANAGER','演示营运管理岗']])jobs.push(await add('jobs',{group_id:gid,code,name,job_family:'全虚构测试职系'}));
-  const grades=[];for(let i=1;i<=3;i++)grades.push(await add('grades',{group_id:gid,code:`SYN-L${i}`,name:`演示职级${i}`,level:i}));
+    address:s.kind==='headquarters'?'上海市静安区南京西路商圈':`${s.brand.id===brandB.id?'香港':'上海市'}${STORE_PLACES[s.brand.id===brandB.id?'B':'A'][s.storeNumber-1]}商圈`}));
+  const jobs=[];for(const [code,name] of [['SYN-SERVICE','服务员'],['SYN-CHEF','厨师'],['SYN-MANAGER','店长']])jobs.push(await add('jobs',{group_id:gid,code,name,job_family:'门店营运'}));
+  const grades=[];for(let i=1;i<=3;i++)grades.push(await add('grades',{group_id:gid,code:`SYN-L${i}`,name:`职级L${i}`,level:i}));
   const departments=[],areas=[],positions=[],byCompany=new Map();
   for(const company of companies) {
     const hq=company.company_kind==='headquarters';
-    const front=await add('departments',{company_id:company.id,code:hq?'SYN-OPS':'SYN-FRONT',name:hq?'演示营运部':'演示前厅部'});departments.push(front);
+    const front=await add('departments',{company_id:company.id,code:hq?'SYN-OPS':'SYN-FRONT',name:hq?'营运管理部':'前厅部'});departments.push(front);
     let kitchen=null;
     if(!hq) {
-      kitchen=await add('departments',{company_id:company.id,code:'SYN-KITCHEN',name:'演示厨房部'});departments.push(kitchen);
-      areas.push(await add('work-areas',{company_id:company.id,department_id:kitchen.id,code:'SYN-DEPT-AREA',name:'演示厨房档口',mode:'department_extension'}));
-      areas.push(await add('work-areas',{company_id:company.id,department_id:kitchen.id,code:'SYN-WORK-AREA',name:'演示炉灶工作区',mode:'work_area_in_department'}));
+      kitchen=await add('departments',{company_id:company.id,code:'SYN-KITCHEN',name:'厨房部'});departments.push(kitchen);
+      areas.push(await add('work-areas',{company_id:company.id,department_id:kitchen.id,code:'SYN-DEPT-AREA',name:'出品档口',mode:'department_extension'}));
+      areas.push(await add('work-areas',{company_id:company.id,department_id:kitchen.id,code:'SYN-WORK-AREA',name:'炉灶档口',mode:'work_area_in_department'}));
     }
     const slots={};
     for(const job of hq?[jobs[2]]:jobs) {
@@ -85,7 +87,7 @@ export async function seed(tx,{userId,input}) {
     assignments.push(row);return row;
   };
   for(let i=1;i<=PEOPLE_COUNT;i++) {
-    const person=await add('people',{group_id:gid,full_name:`虚构人员${String(i).padStart(2,'0')}`});people.push(person);
+    const person=await add('people',{group_id:gid,full_name:demoPersonName(i-1)});people.push(person);
     // Swap one current slot between A01/B01: every store still has three
     // employees after the cross-brand rehire, without inventing a fourth worker.
     const company=MANAGER_ORDINALS.includes(i)?companies[20]:i===1?companies[10]:i===31?companies[0]:companies[Math.floor((i-1)/3)];
@@ -126,7 +128,7 @@ export async function seed(tx,{userId,input}) {
     metrics:[{code:'quality',unit:'ratio',method:'direct_deduction'},{code:'turnover',unit:'ratio',method:'direct_deduction'}],
     rating_bands:[{min_score:.995,grade:'S',factor:2},{min_score:.945,grade:'A',factor:1.5},{min_score:.845,grade:'B',factor:1.2},{min_score:.505,grade:'C',factor:1},{min_score:0,grade:'D',factor:0}],
     grade_bases:{[grades[0].id]:1000,[grades[1].id]:1600,[grades[2].id]:2200},management:{confirmed:true,method:'weighted_company_scores'},
-    score_tolerance:.000001,amount_tolerance:.01,policy_notes:'全虚构测试参数；按地区及币种独立选择聚合、分级、资格和基数，不依赖外部客户审批，不作汇率换算。'};
+    score_tolerance:.000001,amount_tolerance:.01,policy_notes:'演示参数方案；按地区及币种独立选择聚合、分级、资格和基数，不依赖外部客户审批，不作汇率换算。'};
   const basePayrollRules=[
     {code:'base_pay',name:'合成基本工资',kind:'earning',expression:'ROUND(IF(employment_type="FT",salary_rate/period_days*employed_days,salary_rate*worked_hours),2)'},
     {code:'overtime',name:'合成加班工资',kind:'earning',expression:'ROUND(IF(employment_type="FT",salary_rate/overtime_divisor*overtime_hours*overtime_multiplier,0),2)'},
@@ -173,12 +175,12 @@ export async function seed(tx,{userId,input}) {
     for(const aggregation of AGGREGATIONS) {
       const label=aggregation==='floor_average_months'?'逐月金额平均取整':'平均分期末职级';
       const cycle=(await performance.createCycle(tx,{userId,input:{group_id:gid,code:`SYN-${region}-Q3-${aggregation==='floor_average_months'?'MONTHLY':'AVERAGE'}`,
-        name:`${region==='HK'?'香港':'内地'}虚构三季度·${label}`,start_date:'2026-07',end_date:'2026-10',payout_period:'2026-11',region_code:region,currency_code:currency,company_ids:companyIds}})).cycle;
-      await performance.saveScheme(tx,{userId,cycleId:cycle.id,input:{rules:{...baseRules,aggregation},source_refs:[{kind:'synthetic',fixture_version:VERSION,region,currency}],confirmation_note:'测试操作者选定本地区虚构方案'}});
+        name:`${region==='HK'?'香港':'内地'}第三期绩效·${label}`,start_date:'2026-07',end_date:'2026-10',payout_period:'2026-11',region_code:region,currency_code:currency,company_ids:companyIds}})).cycle;
+      await performance.saveScheme(tx,{userId,cycleId:cycle.id,input:{rules:{...baseRules,aggregation},source_refs:[{kind:'synthetic',fixture_version:VERSION,region,currency}],confirmation_note:'本地区绩效方案选定并记录'}});
       await performance.saveInputs(tx,{userId,cycleId:cycle.id,input:{company_metrics:metrics,person_months:months,responsibilities:responsibility}});
       let result=await performance.calculate(tx,{userId,cycleId:cycle.id});
       if(!result.scope.can_confirm)fail(`${region}合成绩效仍有阻断，请检查初始化规则`);
-      if(aggregation===selectedByRegion[region])result=await performance.confirm(tx,{userId,cycleId:cycle.id,input:{result_version:result.cycle.result_version,reason:'操作者启用本地区本币种的全虚构演示方案，不代表客户制度或真实付款'}});
+      if(aggregation===selectedByRegion[region])result=await performance.confirm(tx,{userId,cycleId:cycle.id,input:{result_version:result.cycle.result_version,reason:'核定本地区方案版本，奖金计算与资金发放分别办理'}});
       cycles.push({id:cycle.id,aggregation,status:result.cycle.status});
     }
     const selectedCycle=cycles.find(c=>c.aggregation===selectedByRegion[region]),comparisonCycle=cycles.find(c=>c.aggregation!==selectedByRegion[region]);
@@ -187,13 +189,13 @@ export async function seed(tx,{userId,input}) {
     const bonusFor=p=>Number(candidates.find(c=>String(c.person_id)===String(p.person.id))?.amount??0);
     const policy=region==='HK'?'香港MPF仅参考一般按月5%、雇员入息下限7100、供款上限1500，来源 https://www.mpfa.org.hk/en/mpf-system/mandatory-contributions/employees （2026-11-16核对）；资格为显式合成布尔输入，不从FT/PT推断年龄、豁免、供款假期或完整法定资格。':
       '内地仅启用BASE通用合成工资项目，未启用香港MPF，也没有自动推定内地个税、社保、公积金标准；需要时由操作者独立配置相应地区模块及参数。';
-    const ruleset=(await payroll.saveRuleSet(tx,{userId,input:{group_id:gid,name:`${region==='HK'?'香港':'内地'}全虚构FT/PT测试规则`,region,currency,status:'approved',approval_ack:true,
+    const ruleset=(await payroll.saveRuleSet(tx,{userId,input:{group_id:gid,name:`${region==='HK'?'香港':'内地'}月薪与小时薪规则`,region,currency,status:'approved',approval_ack:true,
       rules:region==='HK'?[...basePayrollRules,...mpfRules]:basePayrollRules,policy_notes:`员工、公司、金额、工时全部独立编造，FT日历天/PT工时、OT除数200倍数1.25、津贴扣款均仅作测试。${policy}没有真实付款或客户资料。`}})).ruleset;
     const header={group_id:gid,region_code:region,currency};
-    const history=(await payroll.createBatch(tx,{userId,input:{...header,period:'2026-10',kind:'source_snapshot',label:`${region}全虚构10月历史快照·未付款`,
+    const history=(await payroll.createBatch(tx,{userId,input:{...header,period:'2026-10',kind:'source_snapshot',label:`${region}10月工资历史快照`,
       metadata:{filename:`synthetic-${region}-history-october`,adapter:VERSION},rows:staff.map(snapshot)}})).batch;
     if(!(await payroll.validateBatch(tx,{userId,batchId:history.id})).ok)fail(`${region}历史快照对账失败`);
-    const newBatch=(await payroll.createBatch(tx,{userId,input:{...header,period:'2026-11',kind:'calculated',label:`${region}全虚构11月工资·已锁定未付款`,metadata:{filename:`synthetic-${region}-inputs-november`,adapter:VERSION},
+    const newBatch=(await payroll.createBatch(tx,{userId,input:{...header,period:'2026-11',kind:'calculated',label:`${region}11月工资确认批次`,metadata:{filename:`synthetic-${region}-inputs-november`,adapter:VERSION},
       rows:staff.map(p=>({...mapping(p,'2026-11'),data_kind:'inputs',inputs:syntheticInputs(p,'2026-11',bonusFor(p)),items:[],source_totals:{}}))}})).batch;
     const applied=await payroll.applyPerformanceCandidates(tx,{userId,batchId:newBatch.id,input:{cycle_id:selectedCycle.id}});
     const repeated=await payroll.applyPerformanceCandidates(tx,{userId,batchId:newBatch.id,input:{cycle_id:selectedCycle.id}});
@@ -201,7 +203,7 @@ export async function seed(tx,{userId,input}) {
     if(!(await payroll.calculateBatch(tx,{userId,batchId:newBatch.id,input:{ruleset_id:ruleset.id}})).ok)fail(`${region}工资试算失败`);
     if(!(await payroll.validateBatch(tx,{userId,batchId:newBatch.id})).ok)fail(`${region}工资核验失败`);
     await payroll.confirmBatch(tx,{userId,batchId:newBatch.id});
-    const editable=(await payroll.createBatch(tx,{userId,input:{...header,period:'2026-12',kind:'calculated',label:`${region}全虚构12月待操作工资`,metadata:{filename:`synthetic-${region}-inputs-december`,adapter:VERSION},
+    const editable=(await payroll.createBatch(tx,{userId,input:{...header,period:'2026-12',kind:'calculated',label:`${region}12月工资试算批次`,metadata:{filename:`synthetic-${region}-inputs-december`,adapter:VERSION},
       rows:staff.map(p=>({...mapping(p,'2026-12'),data_kind:'inputs',inputs:syntheticInputs(p,'2026-12'),items:[],source_totals:{}}))}})).batch;
     regional[region]={region_code:region,currency_code:currency,selected_aggregation:selectedByRegion[region],company_ids:companyIds,person_ids:personIds,
       performance_cycle_ids:cycles.map(c=>c.id),selected_cycle_id:selectedCycle.id,comparison_cycle_id:comparisonCycle.id,ruleset_id:ruleset.id,
@@ -214,8 +216,9 @@ export async function seed(tx,{userId,input}) {
   // This opt-in synthetic initializer is authorized to do both; the ordinary
   // bridge service continues to grant no resource or data-scope permissions.
   const legalEntities={};
-  legalEntities.CN=(await bridge.createLegalEntity(tx,{userId,input:{company_id:companies[0].id,name:`天意集团测试内地用工主体（虚构·G${gid}）`,address:'全虚构内地测试地址'}})).row.id;
-  legalEntities.HK=(await bridge.createLegalEntity(tx,{userId,input:{company_id:companies[10].id,name:`天意集团测试香港用工主体（虚构·G${gid}）`,address:'全虚构香港测试地址'}})).row.id;
+  const legalName=async name=>(await q(tx,'SELECT 1 FROM legal_entity WHERE name=$1',[name])).length?name+'第'+gid+'分支':name;
+  legalEntities.CN=(await bridge.createLegalEntity(tx,{userId,input:{company_id:companies[0].id,name:await legalName('天意集团上海用工主体'),address:'上海市静安区南京西路商圈'}})).row.id;
+  legalEntities.HK=(await bridge.createLegalEntity(tx,{userId,input:{company_id:companies[10].id,name:await legalName('天意集团香港用工主体'),address:'香港湾仔商业区'}})).row.id;
   let root=(await q(tx,'SELECT id FROM org_unit WHERE parent_id IS NULL ORDER BY id LIMIT 1'))[0]?.id||null;
   let parent=root?Number((await q(tx,"SELECT fn_org_add($1,$2,'region',NULL) id",[root,`TY-TEST测试兼容范围·G${gid}`]))[0].id):null;
   const legacyOrgIds=[],legacyEmploymentIds=[];
@@ -241,18 +244,18 @@ export async function seed(tx,{userId,input}) {
   const personMap=new Map(legacyPeople.map(p=>[String(p.id),Number(p.legacy_person_id)]));
   const shiftCode=`TYT${gid}`;
   await tx.query('LOCK TABLE shift_def IN SHARE ROW EXCLUSIVE MODE');
-  await tx.query("INSERT INTO shift_def(code,name,start_time,end_time,color,is_rest,shift_id) SELECT $1,'天意测试日班','09:00','17:00','#3476b8',false,coalesce(max(shift_id),0)+1 FROM shift_def",[shiftCode]);
+  await tx.query("INSERT INTO shift_def(code,name,start_time,end_time,color,is_rest,shift_id) SELECT $1,'门店日班','09:00','17:00','#3476b8',false,coalesce(max(shift_id),0)+1 FROM shift_def",[shiftCode]);
   const nextWeek=(await q(tx,"SELECT (date_trunc('week',current_date)+interval '7 days')::date::text date"))[0].date;
   const schedules=[];
   for(const company of companies.filter(c=>c.company_kind==='store')) {
     const p=current.find(p=>String(p.company.id)===String(company.id));
     const org=legacyOrgIds[companies.findIndex(c=>String(c.id)===String(company.id))];
-    schedules.push((await roster.assign(tx,{userId,employeeId:personMap.get(String(p.person.id)),date:nextWeek,shift:shiftCode,storeId:Number(org),reason:'全虚构测试工作区：未来一周排班示例'})).schedule_id);
+    schedules.push((await roster.assign(tx,{userId,employeeId:personMap.get(String(p.person.id)),date:nextWeek,shift:shiftCode,storeId:Number(org),reason:'周排班已按岗位覆盖和休息安排编制'})).schedule_id);
   }
-  const course=await training.createCourse(tx,{userId,code:`TYTEST-${gid}`,name:'天意测试服务与安全入门（虚构）',category:'skill',stdHours:2,statutory:false,note:'独立虚构的功能演练课程，不产生法定培训结论'});
+  const course=await training.createCourse(tx,{userId,code:`TYTEST-${gid}`,name:'门店服务与食品安全入门',category:'skill',stdHours:2,statutory:false,note:'覆盖顾客服务、食品处理与门店安全操作'});
   const sessions=[];let enrollmentCount=0;
   for(const region of ['CN','HK']) {
-    const session=await training.createSession(tx,{userId,courseId:course.id,entityId:Number(legalEntities[region]),date:nextWeek,fromTime:'18:00',toTime:'20:00',hours:2,capacity:64,trainer:'虚构培训讲师',place:`${region}全虚构培训场地`});
+    const session=await training.createSession(tx,{userId,courseId:course.id,entityId:Number(legalEntities[region]),date:nextWeek,fromTime:'18:00',toTime:'20:00',hours:2,capacity:64,trainer:'田沛然',place:`${region==='CN'?'上海品牌培训中心':'香港湾仔培训室'}`});
     const enrolled=await training.enroll(tx,{userId,sessionId:session.id,employeeIds:current.filter(p=>p.region===region).map(p=>personMap.get(String(p.person.id)))});
     sessions.push(session.id);enrollmentCount+=enrolled.count;
   }
@@ -268,7 +271,7 @@ export async function seed(tx,{userId,input}) {
       employments:employments.length,assignments:assignments.length,performance_cycles:4,regions:Object.fromEntries(Object.entries(regional).map(([k,r])=>[k,{...r.summary,currency:r.currency_code,selected_aggregation:r.selected_aggregation}])),management_people:3,
       confirmed_performance_candidates:PEOPLE_COUNT,performance_inputs_posted:PEOPLE_COUNT,historical_rows:PEOPLE_COUNT,historical_status:'validated',november_rows:PEOPLE_COUNT,november_status:'confirmed',december_rows:PEOPLE_COUNT,december_status:'draft',payroll_batches:6,
       legacy_companies:legacyOrgIds.length,legacy_people:personMap.size,legacy_employments:legacyEmploymentIds.length,legacy_schedules:schedules.length,training_enrollments:enrollmentCount,payments_executed:0},
-    notice:'全虚构测试工作区已建立：内地CNY、香港HKD独立绩效与工资，不混币种或作汇率换算；同人履历贯通。各地区已选周期和11月工资锁定，对照周期及12月工资可编辑。兼容排班培训已显式桥接并仅授权这些测试组织/主体；没有真实资料或付款。'};
+    notice:'演示帐套已建立：内地CNY、香港HKD独立绩效与工资，不混币种或作汇率换算；同人履历贯通。各地区已选周期和11月工资锁定，对照周期及12月工资可编辑。兼容排班培训已显式桥接并仅授权这些测试组织/主体；没有真实资料或付款。'};
   await tx.query(`INSERT INTO ty_audit(actor_id,action,entity_kind,entity_id,after_data) VALUES($1,'seed','test_workspace',$2,$3::jsonb)`,[userId,gid,JSON.stringify(result)]);
   return result;
 }

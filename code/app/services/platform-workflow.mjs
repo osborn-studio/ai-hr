@@ -1,3 +1,4 @@
+import{subjectDepartment,snapshotScopeAvailable}from'./workflow-scope.mjs';
 import{grantAllowsField}from'./platform-core.mjs';
 import{sameHuman,humanIsPerson}from'./human-identity.mjs';
 import{q,one,same,bad,deny,conflict,missing,id,text,obj,revision,groupFor,rowScope,requireAccess,authorization,command,audit,emit,hash,currentOperator,visibleOperators}from'./platform-core.mjs';
@@ -9,6 +10,10 @@ const RESOURCE='workflow_manage';
 // Each business adapter reopens its own source and current complete grants.
 // Generic workflow values never substitute for payroll/personnel authority.
 async function businessAdapter(t,type){
+ if(type==='personal_service'){
+  if(!(await one(t,"SELECT to_regclass('public.ty_personal_service_request')IS NOT NULL ok")).ok)bad('个人住宿与领用审批尚未安装');
+  const a=await import('./personal-services.mjs');return{submit:a.submitSubject,approve:a.assertApproval,project:a.projectInstance,execute:a.executeSubject,reject:a.rejectSubject,cancel:a.cancelSubject};
+ }
  if(['payroll_source_preview','payroll_batch'].includes(type)){
   if(!(await one(t,"SELECT to_regclass('public.ty_pay_batch')IS NOT NULL ok")).ok)bad('薪酬业务适配器尚未安装');
   const a=await import('./platform-payroll.mjs');return{submit:a.submitPayrollSubject,approve:a.assertPayrollApproval,project:a.projectPayrollInstance,execute:a.executePayrollSubject,reject:a.rejectPayrollSubject,cancel:a.cancelPayrollSubject};
@@ -21,6 +26,10 @@ async function businessAdapter(t,type){
   if(!(await one(t,"SELECT to_regclass('public.ty_hr_record_proposal')IS NOT NULL ok")).ok)bad('招聘合同审批适配器尚未安装');
   const a=await import('./platform-hr-records.mjs');return{submit:a.submitHrRecordSubject,approve:a.assertHrRecordApproval,project:a.projectHrRecordInstance,execute:a.executeHrRecordSubject,reject:a.rejectHrRecordSubject,cancel:a.cancelHrRecordSubject};
  }
+ if(['learning_result','learning_application'].includes(type)){
+  const table=type==='learning_result'?'public.ty_lr_grade':'public.ty_lr_application';if(!(await one(t,'SELECT to_regclass($1)IS NOT NULL ok',[table])).ok)bad('培训考试审批模块尚未安装');
+  const a=await import('./platform-learning.mjs');return{submit:a.submitLearningSubject,approve:a.assertLearningApproval,project:a.projectLearningInstance,execute:a.executeLearningSubject,reject:a.rejectLearningSubject,cancel:a.cancelLearningSubject};
+ }
  if(type==='performance_result'){
   if(!(await one(t,"SELECT to_regclass('public.ty_pr_cycle_root')IS NOT NULL ok")).ok)bad('绩效结果审批模块尚未安装');
   const a=await import('./platform-performance.mjs');return{submit:a.submitPerformanceSubject,approve:a.assertPerformanceApproval,project:a.projectPerformanceInstance,execute:a.executePerformanceSubject,reject:a.rejectPerformanceSubject,cancel:a.cancelPerformanceSubject};
@@ -28,12 +37,12 @@ async function businessAdapter(t,type){
  return null;
 }
 async function definition(t,kind,key){const r=await one(t,`SELECT * FROM ${TABLES[kind]} WHERE id=$1`,[id(key)]);if(!r)missing();return r;}
-async function scope(t,userId,group,company=null,action='write'){await requireAccess(t,userId,RESOURCE,action,{group_id:group,company_id:company});}
+async function scope(t,userId,group,company=null,action='write',context={}){await requireAccess(t,userId,RESOURCE,action,{...context,group_id:group,company_id:company});}
 async function validateRefs(t,schema,values,group,company,userId){
  for(const f of schema.fields){const value=values[f.key];if(value==null)continue;
   if(f.type==='person'){if(!await one(t,'SELECT 1 FROM ty_person WHERE id=$1 AND group_id=$2',[id(value),group]))bad('表单人员不属于集团');const a=await groupFor(t,userId,group);if(a.access.selfOnly&&!same(a.access.selfPersonId,value))deny('只能提交本人的业务表单');if(company&&!await one(t,"SELECT 1 FROM ty_employment WHERE person_id=$1 AND company_id=$2 AND status<>'cancelled'",[value,company]))bad('表单人员没有所选公司的雇佣记录');}
   if(f.type==='company'){const c=await one(t,'SELECT id company_id,group_id,ledger_id FROM ty_company WHERE id=$1 AND group_id=$2',[id(value),group]);if(!c)bad('表单公司不属于集团');await rowScope(t,userId,c);}
-  if(f.type==='file'&&value.length)bad('附件存储尚未接入；不能把未核验的文件路径作为附件');
+  if(f.type==='file'&&value.length&&!(await one(t,"SELECT to_regclass('public.ty_pf_attachment')IS NOT NULL ok")).ok)bad('附件存储尚未接入；不能把未核验的文件路径作为附件');
  }
 }
 async function optionsFor(t,userId,group,company){return visibleOperators(t,userId,group,{options:true,companyId:company});}
@@ -53,7 +62,7 @@ async function resolveApprovers(t,instance,node){
   const delegation=await one(t,"SELECT * FROM ty_workflow_delegate WHERE group_id=$1 AND from_account_id=$2 AND status='active' AND valid_from<=now()AND now()<valid_to ORDER BY valid_from DESC LIMIT 1",[instance.group_id,actor]);
   if(delegation&&candidates.has(String(delegation.to_account_id)))actor=Number(delegation.to_account_id);
   if(await sameHuman(t,actor,instance.applicant_id)||await humanIsPerson(t,actor,instance.group_id,instance.person_id))continue;
-  if(!(await authorization(t,{userId:actor,resource:'workflow_self',action:'approve',groupId:instance.group_id,companyId:instance.company_id})).allowed)continue;
+  if(!(await authorization(t,{userId:actor,resource:'workflow_self',action:'approve',groupId:instance.group_id,companyId:instance.company_id,personId:instance.person_id,departmentId:instance.department_id})).allowed)continue;
   try{await assertDomainApproval(t,{userId:actor,instance});}catch(e){if(String(e.message).startsWith('E_TY_FORBIDDEN:'))continue;throw e;}
   out.push(actor);
  }return[...new Set(out)];
@@ -121,7 +130,7 @@ export async function approvalRequirement(t,{userId,subjectType,groupId,companyI
 }
 export async function verifyApprovalReceipt(t,{userId,instanceId,subjectType,subjectId,sourceHash}){
  const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1',[id(instanceId)]);if(!inst)missing();
- await scope(t,userId,inst.group_id,inst.company_id,'execute');
+ await scope(t,userId,inst.group_id,inst.company_id,'execute',inst);
  if(inst.status!=='approved'||!inst.last_approver_id||await sameHuman(t,inst.last_approver_id,inst.applicant_id)||await humanIsPerson(t,inst.last_approver_id,inst.group_id,inst.person_id))deny('审批尚未完成有效的非本人复核');
  if(inst.subject_type!==subjectType||!same(inst.subject_id,subjectId)||inst.source_hash!==sourceHash)conflict('审批凭证与当前业务来源不一致');
  if(!['pending','applied'].includes(inst.business_state))conflict('业务执行已阻断，请核查来源');
@@ -145,22 +154,26 @@ async function subjectFor(t,userId,f,input,values,operationId){
 }
 export async function submitInstance(t,{userId,input,operationId}){
  const f=await definition(t,'form',input.form_id),operator=await currentOperator(t,userId),company=id(input.company_id===undefined?operator?.company_id:input.company_id,true);
- await requireAccess(t,userId,'workflow_self','submit',{group_id:f.group_id,company_id:company,person_id:operator?.person_id});
+ const nativeScope=await snapshotScopeAvailable(t);if(nativeScope)await groupFor(t,userId,f.group_id);else await requireAccess(t,userId,'workflow_self','submit',{group_id:f.group_id,company_id:company,person_id:operator?.person_id});
  return command(t,{userId,groupId:f.group_id,operation:'instance.submit',operationId,input,project:projectReceipt(t,userId),execute:async()=>{
   if(f.status!=='published')bad('只能使用已发布表单');if(f.company_id&&(!company||!same(f.company_id,company)))bad('表单不适用于当前公司');
   const w=await definition(t,'workflow',f.workflow_id);if(w.status!=='published')bad('流程版本已停用，请刷新可发表单');const parsed=validateValues(f.schema,input.values);if(!parsed.valid)bad(parsed.issues.join('；'));await validateRefs(t,f.schema,parsed.values,f.group_id,company,userId);
-  await requireAccess(t,userId,'workflow_self','submit',{group_id:f.group_id,company_id:company,person_id:operator?.person_id,fields:Object.keys(parsed.values)});
+  if(!nativeScope)await requireAccess(t,userId,'workflow_self','submit',{group_id:f.group_id,company_id:company,person_id:operator?.person_id,fields:Object.keys(parsed.values)});
+  const files=f.schema.fields.some(x=>x.type==='file'&&parsed.values[x.key]?.length)?await import('./portal-files.mjs'):null;if(files)await files.validateFormAttachments(t,{userId,form:f,values:parsed.values,companyId:company});
   const subject=await subjectFor(t,userId,f,input,parsed.values,operationId);
+  if(nativeScope){const targetCompany=subject.group_scoped?null:subject.company_id||company,targetPerson=subject.person_id||operator?.person_id||null;await requireAccess(t,userId,'workflow_self','submit',{group_id:f.group_id,company_id:targetCompany,person_id:targetPerson,department_id:await subjectDepartment(t,{groupId:f.group_id,companyId:targetCompany,personId:targetPerson}),fields:Object.keys(parsed.values)});}
   const frozenValues={...parsed.values};for(const [key,value]of Object.entries(subject.authoritative_values||{}))if(Object.hasOwn(frozenValues,key))frozenValues[key]=value;if(subject.authoritative_quantity&&Object.hasOwn(frozenValues,'quantity'))frozenValues.quantity=subject.authoritative_quantity;
   const inst=await one(t,`INSERT INTO ty_workflow_instance(group_id,company_id,form_id,workflow_id,form_version,workflow_version,title,applicant_id,person_id,form_values,graph_snapshot,source_hash,subject_type,subject_id)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14)RETURNING *`,[f.group_id,subject.group_scoped?null:subject.company_id||company,f.id,w.id,f.version,w.version,text(subject.authoritative_title||input.title||f.name,'事项标题',1,200),userId,subject.person_id||operator?.person_id||null,JSON.stringify(frozenValues),JSON.stringify(w.graph),subject.hash,subject.type,subject.id]);
+  if(nativeScope)await requireAccess(t,userId,'workflow_self','submit',{...inst,fields:Object.keys(parsed.values)});
+  if(files)await files.bindFormAttachments(t,{userId,instance:inst,form:f,values:parsed.values,companyId:company});
   await log(t,inst,userId,'submitted',null);await advance(t,inst,w.graph.nodes.find(n=>n.type==='start').id,userId);return{instance:await projectInstance(t,userId,inst.id)};
  }});
 }
 export async function projectInstance(t,userId,instanceId,{fields:requestedFields=null}={}){
  const inst=await one(t,'SELECT i.*,f.schema FROM ty_workflow_instance i JOIN ty_form_definition f ON f.id=i.form_id WHERE i.id=$1',[id(instanceId)]);if(!inst)missing();const own=same(userId,inst.applicant_id),task=await one(t,'SELECT 1 FROM ty_workflow_task WHERE instance_id=$1 AND approver_id=$2',[inst.id,userId]),copy=await one(t,'SELECT 1 FROM ty_workflow_copy WHERE instance_id=$1 AND account_id=$2',[inst.id,userId]);
  const operator=await currentOperator(t,userId);if(operator?.profile_code==='config_admin')deny('系统配置不开放业务表单内容');
- if(!own&&!task&&!copy)await scope(t,userId,inst.group_id,inst.company_id,'read');else await requireAccess(t,userId,'workflow_self','read',inst);
- const decision=await authorization(t,{userId,resource:task||copy||own?'workflow_self':'workflow_manage',action:'read',groupId:inst.group_id,companyId:inst.company_id,personId:inst.person_id}),keys=requestedFields?inst.schema.fields.map(f=>f.key).filter(k=>requestedFields.includes(k)):[...inst.schema.fields.map(f=>f.key),'title','approval_reason','actor_name'];let selected=[];for(const grant of decision.allowing_grants||[]){const allowed=keys.filter(k=>grantAllowsField(grant,k));if(allowed.length>selected.length)selected=allowed;}const allowedFields=inst.schema.fields.map(f=>f.key).filter(k=>selected.includes(k));
+ if(!own&&!task&&!copy)await scope(t,userId,inst.group_id,inst.company_id,'read',inst);else await requireAccess(t,userId,'workflow_self','read',inst);
+ const decision=await authorization(t,{userId,resource:task||copy||own?'workflow_self':'workflow_manage',action:'read',groupId:inst.group_id,companyId:inst.company_id,personId:inst.person_id,departmentId:inst.department_id}),keys=requestedFields?inst.schema.fields.map(f=>f.key).filter(k=>requestedFields.includes(k)):[...inst.schema.fields.map(f=>f.key),'title','approval_reason','actor_name'];let selected=[];for(const grant of decision.allowing_grants||[]){const allowed=keys.filter(k=>grantAllowsField(grant,k));if(allowed.length>selected.length)selected=allowed;}const allowedFields=inst.schema.fields.map(f=>f.key).filter(k=>selected.includes(k));
  const values=projectValues(inst.schema,inst.form_values,{restricted:true,allowedFields});
  const visible=inst.schema.fields.filter(f=>Object.hasOwn(values,f.key));
  const out={...inst,values,value_labels:Object.fromEntries(visible.map(f=>[f.key,f.label])),value_types:Object.fromEntries(visible.map(f=>[f.key,f.type])),node_label:inst.graph_snapshot.nodes.find(n=>n.id===inst.current_node)?.label||inst.current_node};
@@ -203,13 +216,13 @@ export async function delegateTasks(t,{userId,input,operationId}){
  }});
 }
 export async function executeInstance(t,{userId,input,operationId}){
- const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1',[id(input.instance_id)]);if(!inst)missing();if((await currentOperator(t,userId))?.profile_code==='config_admin')deny('配置岗位不执行业务表单');await scope(t,userId,inst.group_id,inst.company_id,'execute');
+ const inst=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1',[id(input.instance_id)]);if(!inst)missing();if((await currentOperator(t,userId))?.profile_code==='config_admin')deny('配置岗位不执行业务表单');await scope(t,userId,inst.group_id,inst.company_id,'execute',inst);
  return command(t,{userId,groupId:inst.group_id,operation:'instance.execute',operationId,input,project:projectReceipt(t,userId),execute:async()=>{
   const current=await one(t,'SELECT * FROM ty_workflow_instance WHERE id=$1 FOR UPDATE',[inst.id]);revision(current,input.expected_revision);if(current.status!=='approved')conflict('审批完成后才可执行');if(current.business_state==='applied'||current.business_state==='not_applicable')return{instance:await projectInstance(t,userId,inst.id),already_applied:true};
   let result;if(current.subject_type==='leave_lifecycle_proposal'){const lifecycle=await import('./leave-lifecycle.mjs');result=await lifecycle.executeApprovedProposal(t,{userId,id:current.subject_id,approvalReceiptId:current.id});}
   else if(current.subject_type==='leave_request'){result=await(await import('./platform-leave.mjs')).executeApprovedLeave(t,{userId,id:current.subject_id,approvalReceiptId:current.id});}
   else if(current.subject_type==='general'){if(!current.last_approver_id)deny('未经过实际审批节点');await t.query("UPDATE ty_workflow_instance SET business_state='not_applicable',revision=revision+1 WHERE id=$1",[inst.id]);result={business_receipt_only:true};}
-  else{const a=await businessAdapter(t,current.subject_type);if(!a)bad('该业务执行器尚未安装');result=await a.execute(t,{userId,instance:current});}const blocked=!!(result?.blocked||result?.source_changed);await log(t,inst,userId,blocked?'business.blocked':'business.executed',null,{subject_type:current.subject_type,subject_id:current.subject_id});return{instance:await projectInstance(t,userId,inst.id),result:{domain_receipt:true,subject_type:current.subject_type,subject_id:current.subject_id,external_payment_created:false,...(blocked?{blocked:true,business_applied:false,source_changed:!!result?.source_changed}:{})}};
+  else{const a=await businessAdapter(t,current.subject_type);if(!a)bad('该业务执行器尚未安装');if(input.business_input!==undefined&&current.subject_type!=='personal_service')bad('此业务不接收额外交接参数');result=await a.execute(t,{userId,instance:current,executionInput:input.business_input??{}});}const blocked=!!(result?.blocked||result?.source_changed);await log(t,inst,userId,blocked?'business.blocked':'business.executed',null,{subject_type:current.subject_type,subject_id:current.subject_id});return{instance:await projectInstance(t,userId,inst.id),result:{domain_receipt:true,subject_type:current.subject_type,subject_id:current.subject_id,external_payment_created:false,...(blocked?{blocked:true,business_applied:false,source_changed:!!result?.source_changed}:{})}};
  }});
 }
 export async function cancelInstance(t,{userId,input,operationId}){

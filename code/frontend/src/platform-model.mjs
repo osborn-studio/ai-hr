@@ -121,5 +121,5 @@ export function fieldVisibilityLabel(access) {
   return (typeof access === 'boolean' ? access : access?.allowed === true) ? '可见' : '不可见';
 }
 
-export const BUSINESS_TYPES = [['general','普通表单'],['leave_request','请假申请'],['leave_lifecycle_proposal','假期权益核定'],['hr_change','入转调离办理'],['hr_requisition','招聘需求核定'],['hr_offer','录用条件核定'],['hr_contract_sign','合同签署登记'],['hr_contract_term','合同条款核定'],['payroll_source_preview','工资来源复核'],['payroll_batch','工资批次确认'],['performance_result','逐人成绩核准']];
+export const BUSINESS_TYPES = [['personal_service','住宿与物品领用'],['general','普通表单'],['leave_request','请假申请'],['leave_lifecycle_proposal','假期权益核定'],['hr_change','入转调离办理'],['hr_requisition','招聘需求核定'],['hr_offer','录用条件核定'],['hr_contract_sign','合同签署登记'],['hr_contract_term','合同条款核定'],['payroll_source_preview','工资来源复核'],['payroll_batch','工资批次确认'],['performance_result','逐人成绩核准'],['learning_result','考试成绩核准'],['learning_application','培训考试结果应用']];
 export const businessTypeLabel = value => BUSINESS_TYPES.find(([code]) => code === value)?.[1] || '其他业务（执行器待核验）';
