@@ -5,6 +5,23 @@ export const PAYROLL_CATEGORIES={cash_earnings:'现金应发',reimbursement:'报
 export const PAYROLL_STATES={draft:'草稿',calculated:'已预演',reviewed:'已复核',adopted:'已采用',confirmed:'已确认',cancelled:'已取消',approved:'已批准',superseded:'历史版本',not_applicable:'不适用',confirmed_zero:'已核为0',pending_review:'待核',unavailable_not_installed:'未配置',reserved:'已占用',released:'已释放'};
 export const CONFIG_NAMES={systems:'公司算薪体系',relationship:'雇主与发薪主体',profile:'人员工资参数',rulebook:'工资项目方案',wage_calendar:'平均工资日历',formula_proposal:'公式与代码提案',policy:'薪税政策版本',enrollment:'人员薪税资格',opening:'累计期初核定',batch_period:'支付与税供款期间'};
 export const SOURCE_NAMES={contract_terms:'合同给薪',payroll_calculation:'工资公式',leave_pay:'普通假期给薪',salary_profile:'工资档案',time_report:'考勤核定',leave_cash:'假期与加班酬金',people_candidate:'费用与福利',performance_result:'历史绩效奖金',performance_award:'绩效与奖金',training_award:'培训与岗位资格薪酬'};
+// Exact names from the existing published payroll item catalogue. Unknown
+// codes retain their code; relationship keys are not used as display names.
+const costItemNames={BASIC_MONTHLY:'基本月薪',BASIC_HOURLY:'基本时薪工资',POSITION_ALLOWANCE:'岗位津贴',TRANSPORT_ALLOWANCE:'现金交通津贴',MEAL_ALLOWANCE:'现金伙食津贴',CN_MIN_WAGE_TOPUP:'内地最低工资补足',HK_MIN_WAGE_TOPUP:'香港最低工资补足',CN_ER_PENSION:'内地雇主养老保险',CN_ER_MEDICAL:'内地雇主医疗保险',CN_ER_UNEMPLOYMENT:'内地雇主失业保险',CN_ER_WORK_INJURY:'内地雇主工伤保险',CN_ER_MATERNITY:'内地雇主生育保险',CN_ER_HOUSING_FUND:'内地雇主住房公积金',HK_ER_MPF_MANDATORY:'香港雇主强制性MPF供款'};
+export function payrollCostText(row,field){
+ const value=row?.[field];if(value===undefined||value===null||value==='')return '—';
+ const raw=String(value),parts=raw.split(':');
+ if(field==='economic_component'){
+  if(parts[0]==='payroll'&&parts.length>=3){const code=parts.at(-1);return costItemNames[code]||(/^[A-Z][A-Z0-9_]{1,79}$/.test(code)?'工资项目 · '+code:'工资项目');}
+  if(parts[0]==='leave_pay'&&parts.length===3&&/^\d+$/.test(parts[1]))return parts[2]==='pay'?'假期新增给薪':parts[2]==='reduction'?'假期正常工资应发差减':'普通假期给薪';
+  if(parts[0]==='stat'){const code=parts.find(part=>Object.hasOwn(costItemNames,part));return code?costItemNames[code]:'薪税项目';}
+  if(parts[0]==='leave')return SOURCE_NAMES.leave_cash;
+  if(parts[0]==='performance')return SOURCE_NAMES.performance_award;
+  if(parts[0]==='people')return SOURCE_NAMES.people_candidate;
+ }
+ if(field==='source_ref'&&parts.length>1)return SOURCE_NAMES[parts[0]]||({workforce:'供应商对账',statutory_calculation:'薪税计算'})[parts[0]]||raw;
+ return raw;
+}
 export const systemName=v=>PAYROLL_SYSTEMS.find(x=>x[0]===v)?.[1]||v||'—';
 export const moneyText=(v,state)=>state==='not_applicable'?'不适用':v===undefined?'—':v===null||v===''?'待核':String(v);
 export function payrollQuery(scope,filter={}){return Object.fromEntries(Object.entries({...scope,...filter}).filter(([k,v])=>['group_id','company_id','ledger_id','view','period','system','q','page','page_size','batch_id','kind','person_id','employment_id','domain','status'].includes(k)&&v!==undefined&&v!==null&&v!==''));}

@@ -6,3 +6,10 @@
 .payroll-configuration .checkbox input{width:15px;min-height:15px;flex:none}.payroll-configuration .checkbox{display:flex;flex-direction:row;align-items:center;gap:9px;margin:10px 0}
 
 .payroll-cost-totals{grid-template-columns:repeat(2,minmax(0,1fr));padding:16px}.payroll-cost-totals .stat-value small{display:inline-block;white-space:nowrap}@media(max-width:480px){.payroll-cost-totals{padding:12px}.payroll-cost-totals .stat-value{font-size:23px}}
+.payroll-cost-workbench .table-scroll table{table-layout:fixed;width:100%;min-width:1040px}
+.payroll-cost-workbench th,.payroll-cost-workbench td{box-sizing:border-box;overflow:hidden;text-overflow:ellipsis}
+.payroll-cost-workbench th:nth-child(1){width:8%}.payroll-cost-workbench th:nth-child(2){width:17%}.payroll-cost-workbench th:nth-child(3){width:19%}.payroll-cost-workbench th:nth-child(4){width:19%}.payroll-cost-workbench th:nth-child(5){width:6%}.payroll-cost-workbench th:nth-child(6){width:11%}.payroll-cost-workbench th:nth-child(7){width:20%}
+.payroll-cost-workbench td:nth-child(4),.payroll-cost-workbench td:nth-child(7){white-space:normal}
+.payroll-cost-workbench .payroll-cost-reference{display:block;max-width:100%;min-width:0;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;background:none;padding:2px 0;font:inherit;line-height:1.5;color:#365d97;text-align:left;cursor:pointer}
+.payroll-cost-workbench .payroll-cost-reference:hover{text-decoration:underline}.payroll-cost-workbench td:nth-child(5){white-space:nowrap}.payroll-cost-workbench td:nth-child(6){white-space:nowrap;font-variant-numeric:tabular-nums}
+.payroll-cost-original{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-size:13px;line-height:1.7}
