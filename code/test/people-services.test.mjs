@@ -36,6 +36,8 @@ try{
  await test('company HR cannot create other-store property',()=>rejects(t=>dispatchCommand(t,{userId:9203,module:'dormitory',action:'house.create',operationId:'FAKE-BAD-COMPANY',input:{company_id:b.id,source_key:'BAD',name:'虚构',address:'虚构地址',jurisdiction:'CN'}})));
  house=(await run('dormitory','house.create',{company_id:c.id,source_key:'HOUSE',name:'虚构青禾宿舍',address:'虚构示例地址（无效）',jurisdiction:'CN'})).row;
  room=(await run('dormitory','room.create',{house_id:house.id,code:'101',name:'虚构一零一室'})).row;
+ await test('empty room directory survives a new workspace query before any bed exists',async()=>{const v=await view('dormitory');assert.ok(v.rooms.some(r=>String(r.id)===String(room.id)&&r.name==='虚构一零一室'));assert.equal(v.beds.filter(b=>String(b.room_id)===String(room.id)).length,0);});
+ await test('self workspace does not expose property room directory',async()=>{const v=await view('dormitory',{},9204);assert.deepEqual(v.rooms,[]);});
  bed1=(await run('dormitory','bed.create',{room_id:room.id,code:'A'})).row;bed2=(await run('dormitory','bed.create',{room_id:room.id,code:'B'})).row;
  const req={employment_id:e1.id,bed_id:bed1.id,source_key:'STAY-A',starts_at:'2026-11-01T00:00+08:00',ends_at:'2026-12-01T00:00+08:00'};
  stay=(await run('dormitory','stay.request',req,9204,'FAKE-STAY-REPLAY')).row;

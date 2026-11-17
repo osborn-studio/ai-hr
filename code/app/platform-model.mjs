@@ -42,7 +42,7 @@ export function validateValues(schema,values){
   if(f.type==='date'&&(!/^\d{4}-\d{2}-\d{2}$/.test(String(v))||!Number.isFinite(Date.parse(v+'T00:00:00Z'))||new Date(v+'T00:00:00Z').toISOString().slice(0,10)!==v))issues.push(`${f.label}日期无效`);
   if(['person','company'].includes(f.type)&&(!Number.isSafeInteger(Number(v))||Number(v)<1))issues.push(`${f.label}关联无效`);
   if(f.type==='select'&&!f.options.some(o=>String(typeof o==='object'?o.value:o)===String(v)))issues.push(`${f.label}不在可选范围`);
-  if(f.type==='file'&&(!Array.isArray(v)||v.some(x=>typeof x!=='string'||x.length>500)))issues.push(`${f.label}须为已有附件引用列表`);
+  if(f.type==='file'&&(!Array.isArray(v)||f.required&&!v.length||v.length>10||v.some(x=>typeof x!=='string'||!/^pf:[0-9a-f-]{36}$/.test(x))))issues.push(`${f.label}须为已上传原件引用列表`);
   out[f.key]=v;
  }return{valid:issues.length===0,issues,values:out};
 }

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:frontend",
+    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:demo-identity && npm run test:frontend",
     "test:db": "node test/run.mjs",
     "test:api": "node test/api.test.mjs",
     "test:scope": "node test/station-scope.mjs",
@@ -68,7 +68,12 @@
     "test:leave": "node test/advanced-leave.test.mjs && node --test test/advanced-leave-law.test.mjs && node test/advanced-leave-security.test.mjs && node test/advanced-leave-native.test.mjs",
     "test:platform": "node --test test/human-identity.test.mjs && node test/platform.test.mjs && node test/authz.test.mjs && node test/integration.test.mjs && node test/platform-leave.test.mjs",
     "test:people-services": "node test/people-services.test.mjs && node test/people-services-native.test.mjs",
-    "test:leave-lifecycle": "node test/leave-lifecycle.test.mjs"
+    "test:leave-lifecycle": "node test/leave-lifecycle.test.mjs",
+    "test:time-native": "node test/advanced-time-v2.test.mjs && node test/time-v2-demo.test.mjs",
+    "test:payroll-native": "node test/payroll-foundation.test.mjs && node test/payroll-statutory-calculations.test.mjs && node test/payroll-statutory-integration.test.mjs && node test/payroll-integrity.test.mjs && node test/native-payroll-demo.test.mjs",
+    "test:hr-native": "node test/hr-foundation.test.mjs && node test/hr-workflow-import.test.mjs && node test/hr-recruitment-contracts.test.mjs && node test/native-hr-demo.test.mjs",
+    "test:performance-native": "node test/performance-native.test.mjs && node test/performance-demo.test.mjs",
+    "test:demo-identity": "node test/native-payroll-hr-combination.test.mjs && TYHR_PERFORMANCE_HR_COMBINED=1 node test/performance-demo.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16"

@@ -14,7 +14,7 @@ export const FIELD_TYPES = [
   ['person', '人员'], ['company', '公司'], ['select', '单选'], ['file', '附件'],
 ];
 export const STATE_NAMES = {
-  not_applicable: '通用表单无需业务入账', running: '审批中', applied: '已生效', disabled: '停用', retired: '已停用版本', unmatched: '未匹配', review: '待核对', confirmed: '已确认', conflict: '有冲突', partial: '部分完成', not_sent: '未发出', recorded: '已记录', unread: '未读', transferred: '已转交', delegated: '已委托', submitted: '已提交', 'task.created': '已生成待办', 'task.approved': '审批已通过', 'task.rejected': '审批已驳回', 'task.transferred': '已转交', 'task.delegated': '已委托', 'business.executed': '业务执行已核验', draft: '草稿', published: '已发布', pending: '待办理', approved: '已批准',
+  not_applicable: '通用表单无需业务入账', running: '审批中', applied: '已生效', disabled: '停用', retired: '已停用版本', unmatched: '未匹配', review: '待核对', confirmed: '已确认', conflict: '有冲突', partial: '部分完成', not_sent: '未发出', recorded: '已记录', unread: '未读', transferred: '已转交', delegated: '已委托', submitted: '已提交', 'task.created': '已生成待办', 'task.approved': '审批已通过', 'task.rejected': '审批已驳回', 'task.transferred': '已转交', 'task.delegated': '已委托', 'business.blocked':'业务来源变化待核','business.executed': '业务执行已核验', draft: '草稿', published: '已发布', pending: '待办理', approved: '已批准',
   rejected: '已驳回', cancelled: '已取消', active: '启用', inactive: '停用',
   completed: '已完成', executed: '业务已生效', blocked: '受阻待核', failed: '失败',
   unknown: '结果待核', not_verified: '未验证', unconfigured: '未配置', sent: '已发出', delivered: '已送达', read: '已读', not_configured: '未配置', configured: '已配置',
@@ -92,7 +92,7 @@ export function parseFormValues(schema, values) {
   const result = {};
   for (const f of list(schema?.fields)) {
     const value = values[f.key];
-    if (f.type === 'file' && f.required) throw new Error('附件上传及引用核验尚未接入，当前不能提交含必填附件的表单。');
+    if(f.type==='file'&&value!==undefined&&value!==null&&(!Array.isArray(value)||f.required&&!value.length||value.length>10||value.some(x=>!/^pf:[0-9a-f-]{36}$/.test(x))))throw new Error('请选择'+f.label+'的已上传原件');
     if (f.required && (value === '' || value === undefined || value === null)) throw new Error('请填写' + f.label);
     if (value === '' || value === undefined || value === null) continue;
     if (['number', 'money'].includes(f.type) && !/^-?\d+(\.\d+)?$/.test(String(value))) throw new Error(f.label + '需为有效数字');
@@ -121,5 +121,5 @@ export function fieldVisibilityLabel(access) {
   return (typeof access === 'boolean' ? access : access?.allowed === true) ? '可见' : '不可见';
 }
 
-export const BUSINESS_TYPES = [['general', '普通表单'], ['leave_request', '请假申请'], ['leave_lifecycle_proposal', '假期权益核定']];
+export const BUSINESS_TYPES = [['general','普通表单'],['leave_request','请假申请'],['leave_lifecycle_proposal','假期权益核定'],['hr_change','入转调离办理'],['hr_requisition','招聘需求核定'],['hr_offer','录用条件核定'],['hr_contract_sign','合同签署登记'],['hr_contract_term','合同条款核定'],['payroll_source_preview','工资来源复核'],['payroll_batch','工资批次确认'],['performance_result','逐人成绩核准']];
 export const businessTypeLabel = value => BUSINESS_TYPES.find(([code]) => code === value)?.[1] || '其他业务（执行器待核验）';

@@ -3,6 +3,8 @@ import * as foundation from './services/foundation.mjs';
 import * as payroll from './services/customer-payroll.mjs';
 import * as performance from './services/customer-performance.mjs';
 import { ACTIONS as PEOPLE_ACTIONS } from './services/people-services.mjs';
+import { ACTIONS as TIME_ACTIONS } from './services/advanced-time-v2.mjs';
+import { operations as PERFORMANCE_OPERATIONS } from './services/performance-native.mjs';
 
 const scope = input => ({ groupId: input.group_id, ledgerId: input.ledger_id, companyId: input.company_id });
 const runScoped = fn => async (tx, input, context) => {
@@ -32,6 +34,23 @@ const leave = name => async (tx, input, context) => {
   });
   return service.projectServiceResult(tx,{userId:context.userId,result});
 };
+const hr=(module,method,operation=null)=>async(tx,input,context)=>{
+  if(!(await tx.query("SELECT to_regclass('public.ty_hr_person_profile')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 人事模块迁移尚未就绪');
+  const service=await import('./services/'+module+'.mjs');
+  return service[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});
+};
+const nativePayroll=method=>async(tx,input,context)=>{
+  if(!(await tx.query("SELECT to_regclass('public.ty_pay_batch')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 薪酬模块迁移尚未就绪');
+  return(await import('./services/payroll-source.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId});
+};
+const statutoryPayroll=method=>async(tx,input,context)=>{
+ if(!(await tx.query("SELECT to_regclass('public.ty_pay_stat_config')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 薪税参数迁移尚未就绪');
+ return(await import('./services/payroll-statutory.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId});
+};
+const nativePerformance=(method,operation=null)=>async(tx,input,context)=>{
+ if(!(await tx.query("SELECT to_regclass('public.ty_pr_cycle_root')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 绩效模块迁移尚未就绪');
+ const service=await import('./services/performance-native.mjs');return service[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});
+};
 export function domainOperations() {
   const query = run => ({ kind: 'query', run });
   const command = run => ({ kind: 'command', run });
@@ -43,10 +62,48 @@ export function domainOperations() {
     'payroll.report': query(legacyRead((tx, i, c) => payroll.report(tx, { ...scope(i), userId: c.userId, batchId: i.batch_id }))),
     'performance.cycles': query(runScoped(performance.listCycles)),
     'performance.report': query(legacyRead((tx, i, c) => performance.report(tx, { ...scope(i), userId: c.userId, cycleId: i.cycle_id }))),
+    ...Object.fromEntries(Object.entries({workspace:'workspace',slip:'payslip',export:'exportPayroll',costs:'bossCosts',wage_basis:'nativeWageBasis'}).map(([name,method])=>['payroll.native.'+name,query(nativePayroll(method))])),
+    ...Object.fromEntries(Object.entries({'config.save':'saveConfiguration','config.approve':'approveConfiguration','batch.create':'createBatch','sources.preview':'previewSources','sources.review':'reviewPreview','sources.adopt':'adoptPreview','batch.confirm':'confirmBatch','batch.cancel':'cancelBatch','slips.publish':'publishPayslips','formula.propose':'proposeFormula'}).map(([name,method])=>['payroll.native.'+name,command(nativePayroll(method))])),
+    'payroll.native.statutory.workspace':query(statutoryPayroll('statutoryWorkspace')),
+    'payroll.native.statutory.config.save':command(statutoryPayroll('saveStatutoryConfiguration')),
+    'payroll.native.statutory.config.approve':command(statutoryPayroll('approveStatutoryConfiguration')),
+    'performance.workspace':query(nativePerformance('queryWorkspace')),
+    'performance.export':query(nativePerformance('exportReport')),
+    'performance.person':query(nativePerformance('personHistory')),
+    ...Object.fromEntries(PERFORMANCE_OPERATIONS.map(name=>[name,command(nativePerformance('dispatchCommand',name))])),
+    'hr.legal.workspace':query(hr('hr-legal-subject','queryWorkspace')),
+    ...Object.fromEntries(['propose','decide','apply','cancel'].map(name=>['hr.legal.'+name,command(hr('hr-legal-subject','dispatchCommand',name))])),
+    'hr.workspace':query(hr('hr','queryWorkspace')),
+    'hr.person.leave':query(hr('hr','personLeave')),
+    'hr.change.detail':query(hr('hr-movements','queryChangeDetail')),
+    'hr.recruitment.workspace':query(hr('hr-recruitment','queryWorkspace')),
+    'hr.contracts.workspace':query(hr('hr-contracts','queryWorkspace')),
+    'hr.files.workspace':query(hr('hr-files','queryWorkspace')),
+    'hr.files.download':query(hr('hr-files','downloadFile')),
+    'hr.import.status':query(hr('hr-import','queryPreview')),
+    'hr.import.inspect':query(hr('hr-import','inspectImport')),
+    'hr.import.template':query(hr('hr-import','importTemplate')),
+    'hr.export':query(hr('hr-import','exportRoster')),
+    'hr.import.preview':command(hr('hr-import','previewImport')),
+    'hr.import.commit':command(hr('hr-import','commitImport')),
+    'hr.file.upload':command(hr('hr-files','dispatchCommand','file.upload')),
+    'hr.records.propose':command(hr('platform-hr-records','createRecordProposal')),
+    'hr.records.workspace':query(hr('platform-hr-records','queryRecordProposals')),
+    'hr.records.detail':query(hr('platform-hr-records','readRecordProposal')),
+    'hr.group.create':command(hr('hr-organization','createGroup')),
+    'hr.brand.create':command(hr('hr-organization','createBrand')),
+    'payroll.native.person':query(nativePayroll('personHistory')),
+    ...Object.fromEntries(['person.create','profile.save','organization.save','field.save','number_rule.save','headcount.create','headcount.publish','change.create','change.decide','change.execute','change.cancel'].map(name=>['hr.'+name,command(hr('hr','dispatchCommand',name))])),
+    ...Object.fromEntries(['requisition.create','requisition.update','requisition.submit','requisition.decide','requisition.close','candidate.create','candidate.resume.attach','candidate.review','candidate.link','candidate.transition','interview.schedule','interview.result','offer.create','offer.update','offer.submit','offer.decide','offer.sent','offer.accept','offer.withdraw','offer.onboard'].map(name=>['hr.recruitment.'+name,command(hr('hr-recruitment','dispatchCommand',name))])),
+    ...Object.fromEntries(['contract.create','contract.update','contract.sign','contract.terminate','term.create','term.review','term.effective','term.end','reminder.configure','reminder.refresh','reminder.read'].map(name=>['hr.contracts.'+name,command(hr('hr-contracts','dispatchCommand',name))])),
     'system.workspace':query(system('queryWorkspace')),
+    'system.command.status':query(async(tx,input,context)=>(await import('./services/portal-commands.mjs')).commandStatus(tx,{userId:context.userId,input})),
     'system.workflow.preview':query(system('previewWorkflow')),
     'system.authorization.simulate':query(system('simulateAuthorization')),
     'system.operation.status':query(system('operationStatus')),
+    'time.workspace':query(async(tx,i,c)=>(await import('./services/advanced-time-v2.mjs')).queryWorkspace(tx,{userId:c.userId,input:i})),
+    'time.export':query(async(tx,i,c)=>(await import('./services/advanced-time-v2.mjs')).exportReport(tx,{userId:c.userId,input:i})),
+    ...Object.fromEntries(TIME_ACTIONS.map(name=>['time.'+name,command(async(tx,i,c)=>(await import('./services/advanced-time-v2.mjs')).dispatchCommand(tx,{userId:c.userId,input:i,operationId:c.operationId,operation:name}))])),
     ...Object.fromEntries(['operator.create','operator.update','operator.reset_password','role.save','role.assign','role.revoke_member','grant.save','grant.revoke','form.save','form.publish','workflow.save','workflow.publish','instance.submit','instance.decide','instance.transfer','instance.delegate','instance.execute','instance.cancel','integration.save','integration.secret','integration.validate','integration.snapshot','integration.mapping'].map(name=>['system.'+name,command(system(name,true))])),
     ...Object.fromEntries(Object.entries(PEOPLE_ACTIONS).flatMap(([module,actions])=>[
       [module+'.workspace',query(async(tx,i,c)=>(await import('./services/people-services.mjs')).queryWorkspace(tx,{userId:c.userId,module,...scope(i),personId:i.person_id,asOf:i.as_of,page:i.page,pageSize:i.page_size,q:i.q}))],
@@ -88,8 +145,9 @@ export function createCloudApiExtension() {
       return true;
     }
     let input;
-    try { input = JSON.parse((await readBody(req, 1024 * 1024)).toString('utf8')); }
-    catch { throw new Error('E_TY_ARGUMENT: 请求内容不是有效JSON对象'); }
+    const upload=match[1]==='command'&&['hr.file.upload','hr.import.preview','time.import.preview','performance.import.preview'].includes(match[2])||match[1]==='query'&&match[2]==='hr.import.inspect';
+    try { input = JSON.parse((await readBody(req, upload?12*1024*1024:1024*1024)).toString('utf8')); }
+    catch (error) { if(error.code==='E_BODY_TOO_LARGE')throw error;throw new Error('E_TY_ARGUMENT: 请求内容不是有效JSON对象'); }
     const [ , kind, name ] = match;
     const port = createDomainPort({ db, operations: domainOperations() });
     const context = { userId: Number(userId) };

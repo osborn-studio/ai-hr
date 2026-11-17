@@ -69,4 +69,4 @@ export async function upgradeDemo(t,{userId,passwordFactory=()=>randomBytes(12).
  return {group_id:g.id,companies:nodes.length,brand_companies:2,cross_brand_person_id:person.id,director_logins:accountSpecs.map(s=>s.login),created_accounts:createdAccounts};
 }
 
-async function addPositionDepartment(t,id,departmentId){await t.query('UPDATE ty_company_position SET department_id=$2 WHERE id=$1',[id,departmentId]);}
+async function addPositionDepartment(t,id,departmentId){const old=(await q(t,'SELECT * FROM ty_company_position WHERE id=$1',[id]))[0],used=(await q(t,'SELECT EXISTS(SELECT 1 FROM ty_position_assignment WHERE position_id=$1)used',[id]))[0].used;if(used){await t.query('INSERT INTO ty_company_position(group_id,company_id,department_id,job_id,grade_id,code,name,parent_position_id)VALUES($1,$2,$3,$4,$5,$6,$7,$8)ON CONFLICT(company_id,code)DO NOTHING',[old.group_id,old.company_id,departmentId,old.job_id,old.grade_id,old.code+'-DEPT-'+departmentId,old.name,old.parent_position_id]);}else await t.query('UPDATE ty_company_position SET department_id=$2 WHERE id=$1',[id,departmentId]);}
