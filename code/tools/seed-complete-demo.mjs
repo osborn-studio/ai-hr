@@ -1,3 +1,4 @@
+import{seedBusinessRemindersDemo}from'./seed-business-reminders-demo.mjs';
 import{seedContractPayrollDemo}from'./seed-contract-payroll-demo.mjs';
 import{seedLeavePayrollHongKongDemo}from'./seed-leave-payroll-demo.mjs';
 // A reproducible, empty-database-only restaurant scenario. It never rewrites
@@ -56,6 +57,7 @@ export async function createCompleteDemo({confirmSynthetic=false,outputDirectory
   const notificationDelivery=await phase('workflow_message_delivery_configuration',()=>seedWorkflowNotificationsDemo(db,{confirmSynthetic:true,origin:noticeOrigin}));await privateJson(outputDirectory,'workflow-message-delivery-scenes.json',notificationDelivery);
   const leaveHongKong=await phase('hong_kong_leave_payroll_correction',()=>seedLeavePayrollHongKongDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'leave-payroll-hk-scenes.json',leaveHongKong);
   const contractPayroll=await phase('contract_payroll_mapping',()=>seedContractPayrollDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'contract-payroll-scenes.json',contractPayroll);
+  const businessReminders=await phase('business_date_reminders',()=>seedBusinessRemindersDemo(db,{confirmSynthetic:true,origin:noticeOrigin}));await privateJson(outputDirectory,'business-reminder-scenes.json',businessReminders);
   const facts=(await db.query("SELECT json_build_object('people',(SELECT count(*)FROM ty_person),'accounts',(SELECT count(*)FROM ty_test_account_profile),'stores',(SELECT count(*)FROM ty_company WHERE org_level='store'),'migrations',(SELECT count(*)FROM schema_migration))facts")).rows[0].facts;
   if(facts.people!==62||facts.accounts!==77||facts.stores!==20)fail('完整演示身份或门店数量不符合场景设计，未标完成');
   const result={version:'TY-NATURAL-RESTAURANT-V6',synthetic_only:true,demonstration_label:'演示帐套',complete:true,...facts,external_calls:0,real_bank_payments:0,passwords_in_artifacts:false};await privateJson(outputDirectory,'complete-demo-manifest.json',result);return result;
