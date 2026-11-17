@@ -63,7 +63,9 @@ const integration=(method,operation)=>async(tx,input,context)=>{if(!(await tx.qu
 const workforce=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_wf_approval_execution')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 供应商用工模块尚未就绪');return(await import('./services/workforce-native.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
 const finance=(module,method)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_pay_finance_subject')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 薪酬资金模块尚未就绪');return(await import('./services/'+module+'.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId});};
 const payrollScript=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_ps_script')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 工资公式扩展模块尚未就绪');return(await import('./services/payroll-scripts.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
-export function operationBodyLimit(kind,name){return(kind==='command'&&['hr.file.upload','hr.import.preview','time.import.preview','performance.import.preview','learning.import.preview','learning.course.save','system.file.upload','integration.runtime.file.preview','workforce.file.upload','payroll.native.finance.document.upload'].includes(name)||kind==='query'&&name==='hr.import.inspect')?12*1024*1024:1024*1024;}
+const recruiting=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_rc_root')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 招聘来源模块尚未就绪');return(await import('./services/recruiting-integration.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
+const esign=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_es_profile')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 合同电子签模块尚未就绪');return(await import('./services/esign-integration.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
+export function operationBodyLimit(kind,name){return(kind==='command'&&['hr.recruiting.file.import','hr.file.upload','hr.import.preview','time.import.preview','performance.import.preview','learning.import.preview','learning.course.save','system.file.upload','integration.runtime.file.preview','workforce.file.upload','payroll.native.finance.document.upload'].includes(name)||kind==='query'&&name==='hr.import.inspect')?12*1024*1024:1024*1024;}
 export function domainOperations() {
   const query = run => ({ kind: 'query', run });
   const command = run => ({ kind: 'command', run });
@@ -106,6 +108,13 @@ export function domainOperations() {
     'hr.change.detail':query(hr('hr-movements','queryChangeDetail')),
     'hr.self.transfer.workspace':query(hr('hr-movements','personalTransferWorkspace')),
     'hr.self.transfer.propose':command(hr('hr-movements','proposePersonalTransfer')),
+    'hr.recruiting.workspace':query(recruiting('queryWorkspace')),
+    'hr.recruiting.template':query(recruiting('sourceTemplate')),
+    'hr.recruiting.download':query(recruiting('sourceDownload')),
+    ...Object.fromEntries(['channel.create','channel.approve','channel.disable','job.enqueue','job.cancel','file.import','source.accept','source.update','source.reject','source.acknowledge'].map(op=>['hr.recruiting.'+op,command(recruiting('dispatchCommand',op))])),
+    'integration.esign.workspace':query(esign('workspace')),
+    'integration.esign.receipt':query(esign('receiptDownload')),
+    ...Object.fromEntries(['profile.save','profile.approve','party.save','party.approve','configuration.disable','intent.propose','intent.approve','intent.start','intent.poll','intent.reconcile','intent.accept'].map(op=>['integration.esign.'+op,command(esign('dispatchCommand',op))])),
     'hr.recruitment.workspace':query(hr('hr-recruitment','queryWorkspace')),
     'hr.contracts.workspace':query(hr('hr-contracts','queryWorkspace')),
     'hr.files.workspace':query(hr('hr-files','queryWorkspace')),

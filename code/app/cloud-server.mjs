@@ -47,6 +47,9 @@ export async function createCloudApp() {
     stops.push(integrationWorker.startIntegrationWorker(app.db,{onError:report('集成任务暂不可用','E_INTEGRATION_WORKER')}));
     const scriptWorker=await import('./workers/payroll-script-worker.mjs');
     if(process.env.TYHR_PAYROLL_SCRIPT_SANDBOX==='quickjs-wasm-v1')stops.push(scriptWorker.startPayrollScriptWorker(app.db));
+    const recruitingWorker=await import('./workers/recruiting-worker.mjs');
+    stops.push(recruitingWorker.startRecruitingWorker(app.db,{onError:report('招聘来源任务暂不可用','E_RECRUITING_WORKER')}));
+    if(process.env.TYHR_ESIGN_ALLOW_LIVE==='1'){const esignWorker=await import('./workers/esign-worker.mjs');stops.push(esignWorker.startEsignWorker(app.db,{onError:report('电子签任务暂不可用','E_ESIGN_WORKER')}));}
     const stopBackgroundWorkers=()=>Promise.all(stops.map(stop=>stop()));
     app.server.once('close',()=>Promise.resolve(stopBackgroundWorkers()).catch(()=>{}));
     return { ...app, config, stopBackgroundWorkers };

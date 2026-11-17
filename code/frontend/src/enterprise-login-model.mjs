@@ -37,3 +37,5 @@ export function ssoCommandInput(operation,values,row={},refs={}){
  if(operation==='configuration.disable'){if(!['profile','binding'].includes(values.kind))throw Error('停用记录种类无效');return{kind:values.kind,id,expected_revision,reason:requiredText(values.reason,'停用依据',4)};}
  throw Error('未登记的登录设置操作');
 }
+
+export const ssoPreflightStages=[['connection_enabled','平台连接已启用'],['credentials_configured','加密凭据已登记'],['internal_application_approved','当前内部应用已核准'],['visible_person_identity_approved','当前可见的已核平台人员对照'],['visible_account_binding_current','当前可见的明确账号对照']];
