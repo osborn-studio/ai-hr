@@ -110,7 +110,7 @@
     "test:time-leave:browser": "node test/time-taken-leave-browser.mjs",
     "test:operator-binding": "node test/platform-operator-binding.test.mjs",
     "test:payroll-setup": "node test/payroll-setup.test.mjs && node test/payroll-setup-review.test.mjs && node test/payroll-salary-sheet.test.mjs && node test/payroll-minimum-qualification.test.mjs",
-    "test:time-formal": "node test/time-formal-default.test.mjs && node test/time-formal-review.test.mjs && node test/time-roster-report-current.test.mjs"
+    "test:time-formal": "node test/time-formal-default.test.mjs && node test/time-formal-review.test.mjs && node test/time-roster-report-current.test.mjs && node test/time-manual-roster-reconciliation.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",
