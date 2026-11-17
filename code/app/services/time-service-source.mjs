@@ -7,6 +7,14 @@ const max=(a,b)=>a>b?a:b,min=(a,b)=>a<b?a:b;
 const fields=['worked_minutes','overtime_minutes','source_ref','company_id'];
 const periodEnd=p=>new Date(Date.UTC(Number(p.slice(0,4)),Number(p.slice(5,7)),0)).toISOString().slice(0,10);
 
+// The shared database check also detects a taken leave changing underneath an
+// unchanged report head. Earlier migration fixtures do not have this check.
+export async function isServiceTimeReportCurrent(t,reportId,employmentId){
+ const installed=await one(t,"SELECT to_regprocedure('public.fn_ty_time_leave_current(bigint,bigint)')IS NOT NULL installed");
+ if(!installed?.installed)return true;
+ return(await one(t,'SELECT fn_ty_time_leave_current($1::bigint,$2::bigint)current',[reportId,employmentId]))?.current===true;
+}
+
 export async function getServiceQuantitySource(t,{userId,employerRootId,throughDate}){
  const operator=await currentOperator(t,userId);if(!operator||operator.status!=='active'||operator.profile_code==='config_admin'||(await accessFor(t,userId)).selfOnly)deny('服务量来源须有当前HR核勤读取权限');
  const root=await one(t,`SELECT h.*,to_char(h.period,'YYYY-MM-DD')period,to_char(e.hire_date,'YYYY-MM-DD')hire_date,to_char(e.leave_date,'YYYY-MM-DD')leave_date,e.status employment_status,e.company_id home_company_id,e.group_id employment_group_id,e.person_id employment_person_id FROM ty_time_report_root h JOIN ty_employment e ON e.id=h.employment_id WHERE h.id=$1`,[id(employerRootId)]);if(!root)missing();if(!same(root.group_id,root.employment_group_id)||!same(root.person_id,root.employment_person_id))deny('核勤根与实际人员身份不符');if(root.perspective!=='employer'||!same(root.owner_company_id,root.home_company_id))bad('仅雇主核勤根可作为服务总量；接收店视图不另增服务量');
@@ -18,6 +26,7 @@ export async function getServiceQuantitySource(t,{userId,employerRootId,throughD
  const result={status:'pending',employer_root_id:root.id,group_id:root.group_id,person_id:root.person_id,employment_id:root.employment_id,home_company_id:root.home_company_id,period,current_report_id:root.current_report_id,head_revision:root.head_revision,coverage_from:from,coverage_to:to,quantity_through_date:throughDate??null,interval_bounds:'closed',source_unit:'minute',worked_minutes:null,overtime_minutes:null,total_service_minutes:null,location_status:'allocation_required',allocations:[],source_fact_keys:[],pending_reasons:[]};
  if(!report||report.status!=='confirmed'){result.pending_reasons.push('EMPLOYER_REPORT_NOT_CONFIRMED');result.source_hash=hash({root,report,through_date:throughDate??null,coverage_from:from,coverage_to:to});return result;}
  if(!await one(t,'SELECT 1 FROM ty_time_report_scope WHERE report_id=$1 AND root_id=$2',[report.id,root.id]))bad('当前核勤版本未冻结该雇主根');
+ if(!await isServiceTimeReportCurrent(t,report.id,root.employment_id)){result.pending_reasons.push('EMPLOYER_REPORT_LEAVE_RECONCILIATION_REQUIRED');result.source_hash=hash({root,report,through_date:throughDate??null,coverage_from:from,coverage_to:to,leave_source_current:false});return result;}
  const lines=await q(t,`SELECT l.*,to_char(l.work_date,'YYYY-MM-DD')work_date FROM ty_time_report_line l WHERE report_id=$1 AND employment_id=$2 AND NOT receiving_store_only AND home_company_id=$3 AND scope_company_id=$3 AND(work_date IS NULL OR work_date BETWEEN $4::date AND $5::date)ORDER BY l.work_date NULLS LAST,l.id`,[report.id,root.employment_id,root.home_company_id,from,to]);
  const days=Math.round((Date.parse(to+'T00:00Z')-Date.parse(from+'T00:00Z'))/86400000)+1;
  const coverage=report.grain==='daily'?lines.length===days&&new Set(lines.map(r=>day(r.work_date))).size===days&&lines.every(r=>r.work_date&&day(r.work_date)>=from&&day(r.work_date)<=to):to===fullTo&&lines.length===1&&lines[0].work_date===null&&Number(lines[0].calendar_days)===days;
