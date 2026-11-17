@@ -67,7 +67,9 @@ const payrollScript=(method,operation)=>async(tx,input,context)=>{if(!(await tx.
 const recruiting=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_rc_root')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 招聘来源模块尚未就绪');return(await import('./services/recruiting-integration.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
 const esign=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_es_profile')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 合同电子签模块尚未就绪');return(await import('./services/esign-integration.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
 const notifications=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_nx_rule')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 审批消息模块尚未就绪');return(await import('./services/notification-integration.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
+const reminders=(method,operation)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_br_notice')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 到期提醒模块尚未就绪');return(await import('./services/business-reminders.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId,...(operation?{operation}:{})});};
 const leavePay=(method)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_lp_fact')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 假期待遇来源模块尚未就绪');return(await import('./services/leave-payroll.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId});};
+const industryPayroll=(method)=>async(tx,input,context)=>{if(!(await tx.query("SELECT to_regclass('public.ty_pay_industry_basis')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 行业供款依据尚未就绪');return(await import('./services/payroll-industry.mjs'))[method](tx,{userId:context.userId,input,operationId:context.operationId});};
 export function operationBodyLimit(kind,name){return(kind==='command'&&['hr.recruiting.file.import','hr.file.upload','hr.import.preview','time.import.preview','performance.import.preview','learning.import.preview','learning.course.save','system.file.upload','integration.runtime.file.preview','workforce.file.upload','payroll.native.finance.document.upload'].includes(name)||kind==='query'&&name==='hr.import.inspect')?12*1024*1024:1024*1024;}
 export function domainOperations() {
   const query = run => ({ kind: 'query', run });
@@ -92,6 +94,10 @@ export function domainOperations() {
     'payroll.native.minimum_basis':query(async(tx,input,context)=>(await import('./services/payroll-minimum-review.mjs')).minimumWageBasis(tx,{userId:context.userId,input})),
     'payroll.native.statutory.config.save':command(statutoryPayroll('saveStatutoryConfiguration')),
     'payroll.native.statutory.config.approve':command(statutoryPayroll('approveStatutoryConfiguration')),
+    'payroll.native.industry.workspace':query(industryPayroll('industryWorkspace')),
+    'payroll.native.industry.standards':query(industryPayroll('industryStandards')),
+    'payroll.native.industry.basis.create':command(industryPayroll('createIndustryBasis')),
+    'payroll.native.industry.basis.approve':command(industryPayroll('approveIndustryBasis')),
     'performance.workspace':query(nativePerformance('queryWorkspace')),
     'performance.export':query(nativePerformance('exportReport')),
     'performance.person':query(nativePerformance('personHistory')),
@@ -122,7 +128,10 @@ export function domainOperations() {
     'hr.recruiting.download':query(recruiting('sourceDownload')),
     ...Object.fromEntries(['channel.create','channel.approve','channel.disable','job.enqueue','job.cancel','file.import','source.accept','source.update','source.reject','source.acknowledge'].map(op=>['hr.recruiting.'+op,command(recruiting('dispatchCommand',op))])),
     'integration.notifications.workspace':query(notifications('queryWorkspace')),
-    'integration.notifications.target':query(notifications('notificationTarget')),
+    'integration.notifications.target':query(async(tx,input,c)=>(await import('./services/notice-targets.mjs')).noticeTarget(tx,{userId:c.userId,input})),
+    'integration.reminders.workspace':query(reminders('queryWorkspace')),
+    'integration.reminders.target':query(reminders('reminderTarget')),
+    ...Object.fromEntries(['rule.save','rule.approve','rule.disable','notice.refresh','lease.save','lease.review','lease.withdraw','delivery.retry','receipt.refresh'].map(op=>['integration.reminders.'+op,command(reminders('dispatchCommand',op))])),
     ...Object.fromEntries(['rule.save','rule.approve','rule.disable','delivery.retry','receipt.refresh'].map(op=>['integration.notifications.'+op,command(notifications('dispatchCommand',op))])),
     'integration.esign.workspace':query(esign('workspace')),
     'integration.esign.receipt':query(esign('receiptDownload')),

@@ -72,6 +72,7 @@ export const navigation = [
     { id:'payroll/settings', name:'薪酬设置', ready:true, access:c=>canRead(c,'payroll_config')||canPayroll(c) },
     { id: 'payroll/payslips', name: '工资单', ready:true, access: canPayroll },
     { id: 'payroll/tax', name: '薪税与社保', ready:true, access: canPayroll },
+    {id:'payroll/industry',name:'香港行业供款依据',ready:true,access:c=>canRead(c,'payroll_sources')},
   ] },
   { id: 'attendance', name: '排班考勤', icon: 'calendar', pages: [
     { id: 'attendance/schedule', ready: true, name: '排班工作台', access: c => canRead(c, 'attendance_daily') },
@@ -125,7 +126,7 @@ export const navigation = [
     { id: 'system/forms', name: '表单设计', subtitle: '字段、预览与版本发布', ready: true, access: c => canConfigureResource(c, 'workflow_manage') },
     { id: 'system/workflow', name: '审批流设计', subtitle: '可视流程、仿真与办理', ready: true, access: c => canConfigureResource(c, 'workflow_manage') },
   ] },
-  { id: 'integrations', name: '集成设置', icon: 'link', bottom: true, pages: [{id:'integrations/esign',name:'合同电子签',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/sso',name:'企业平台登录',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/notifications',name:'审批消息与回执',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/runtime',name:'同步、打卡与消息',ready:true,access:c=>canConfigureResource(c,'integration_manage')}, { id: 'integrations/connections', name: '连接与接口对账', subtitle: '连接、组织对照与回传日志', ready: true, access: c => canConfigureResource(c, 'integration_manage') }] },
+  { id: 'integrations', name: '集成设置', icon: 'link', bottom: true, pages: [{id:'integrations/esign',name:'合同电子签',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/sso',name:'企业平台登录',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/reminders',name:'到期提醒与通知',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/notifications',name:'审批消息与回执',ready:true,access:c=>canConfigureResource(c,'integration_manage')},{id:'integrations/runtime',name:'同步、打卡与消息',ready:true,access:c=>canConfigureResource(c,'integration_manage')}, { id: 'integrations/connections', name: '连接与接口对账', subtitle: '连接、组织对照与回传日志', ready: true, access: c => canConfigureResource(c, 'integration_manage') }] },
 ];
 export function visibleNavigation(capabilities) { return navigation.map(group => ({ ...group, pages: group.pages.filter(p => p.access(capabilities)) })).filter(group => group.pages.length); }
 export function routePage(route) {if(/^payroll\/contracts\/term\/[0-9]+$/.test(route))return navigation.flatMap(g=>g.pages).find(p=>p.id==='payroll/contracts');if(/^my\/(tasks|alerts)\/notice\/[a-f0-9]{32}$/.test(route))return navigation.flatMap(g=>g.pages).find(p=>p.id===route.split('/').slice(0,2).join('/')); return navigation.flatMap(group => group.pages).find(page => route === page.id) || (route.startsWith('people/detail/') ? { id: 'people', name: '员工全貌', ready: true, access: canPeople } : route.startsWith('payroll/batch/') ? { id: 'payroll', name: '工资批次', ready: true, access: canPayroll } : null); }
