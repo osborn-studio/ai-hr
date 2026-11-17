@@ -1,0 +1,7 @@
+import test from'node:test';import assert from'node:assert/strict';
+import{scriptScope,parseSpecs,scriptInput}from'../src/payroll-script-model.mjs';
+test('script scope never forwards UI-only brand or invented identity fields',()=>assert.deepEqual(scriptScope({group_id:1,company_id:'9007199254740991',brand_id:8,userId:99}),{group_id:'1',company_id:'9007199254740991'}));
+test('parameter output amounts and identifiers remain exact strings',()=>{const v=scriptInput('save',{company_id:'9007199254740991',inputs:[{alias:'salary',source:'profile_parameter',key:'monthly',unit:'currency_amount'}],outputs:[{key:'monthly',unit:'currency_amount',minimum:'0.01',maximum:'9999999999999999.99'}]});assert.equal(v.company_id,'9007199254740991');assert.equal(v.output_spec.monthly.maximum,'9999999999999999.99');});
+test('duplicate declared aliases are rejected before command submission',()=>assert.throws(()=>parseSpecs([{alias:'pay'},{alias:'pay'}],'input'),/不能重复/));
+test('profile approval reuses actual proposal config revision rather than run revision',()=>assert.deepEqual(scriptInput('profile.approve',{}, {id:4,revision:1,profile_config_id:'98',profile_revision:7}),{id:'98',expected_revision:7}));
+test('preview freezes the shown actual base version and hash',()=>assert.deepEqual(scriptInput('preview',{script_id:'7',employment_id:'15',period:'2026-10',base_profile_id:'29',base_hash:'abc'}),{script_id:'7',employment_id:'15',period:'2026-10',report_id:undefined,base_profile_id:'29',base_hash:'abc'}));

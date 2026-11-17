@@ -6,6 +6,8 @@ import {payrollInternals as H} from './payroll-source.mjs';
 import {amount,plus,minus,times,compare,fraction} from '../payroll-calculations.mjs';
 import {exactDecimal} from '../leave-calculations.mjs';
 import {cnCumulativeIIT,cnSocialContribution,hkMpfRegular} from '../payroll-statutory-calculations.mjs';
+import {cnSocialRounded} from '../payroll-contribution-rounding.mjs';
+import{validateIndustryPolicy,industryCalculation}from'./payroll-industry.mjs';
 const num=v=>{H.numeric(v);if(compare(v,'0')<0)bad('薪税参数不能为负');return v;};
 const bool=(v,k)=>{if(typeof v!=='boolean')bad(k+'必须是已核true/false');return v;};
 const active=(v,on)=>v?.status==='approved'&&H.date(v.valid_from)<=on&&(!v.valid_to||H.date(v.valid_to)>on);
@@ -15,15 +17,15 @@ const res=r=>r.person_id?'payroll_sources':'payroll_config';
 async function get(t,key){const r=await one(t,'SELECT * FROM ty_pay_stat_config WHERE id=$1',[id(key)]);if(!r)bad('薪税核定配置不存在');return r;}
 async function validate(t,input){const d=input.data;if(!d||typeof d!=='object'||Array.isArray(d))bad('薪税配置须为结构化对象');
  if(input.kind==='policy'){
-  if(!['CN_IIT','CN_SOCIAL','HK_MPF_REGULAR'].includes(d.type))bad('尚未实现此法定模板，不能泛用普通月度规则');
-  if(d.type==='CN_IIT'){
+  if(!['CN_IIT','CN_SOCIAL','HK_MPF_REGULAR','HK_MPF_INDUSTRY'].includes(d.type))bad('尚未实现此法定模板，不能泛用普通月度规则');
+  if(d.type==='HK_MPF_INDUSTRY'){if(input.system!=='HK_PAYROLL')bad('行业供款须为香港体系');validateIndustryPolicy(d,H.date(input.valid_from));}else if(d.type==='CN_IIT'){
    if(input.system!=='CN_PAYROLL')bad('内地税表体系错误');
    cnCumulativeIIT({incomeBefore:'0',deductibleBefore:'0',specialBefore:'0',otherBefore:'0',basicBefore:'0',taxWithheldBefore:'0',currentIncomeDelta:'0',currentDeductibleDelta:'0',currentSpecialDelta:'0',currentOtherDelta:'0',basicForPeriod:'0',basicAlreadyRecognized:'0',brackets:d.brackets});
    if(!Array.isArray(d.deductible_codes))bad('须明确已核个人社保公积金扣除项目集合');
    for(const code of d.deductible_codes)if(!Object.values(catalogPairs).flat().filter(Boolean).filter(c=>c.startsWith('CN_EMP_')).includes(code))bad('个人税前扣除不能混入雇主成本或未知项目');
   }else{
    for(const k of ['lower','upper','employee_rate','employer_rate'])num(d[k]);
-   if(d.type==='CN_SOCIAL'){if(d.rounding_scale!==undefined&&d.rounding_scale!==2)bad('所选地方整元供款适配尚未安装，不能忽略舍入参数继续按分计算');
+   if(d.type==='CN_SOCIAL'){if(d.rounding_scale!==undefined&&(![0,2].includes(d.rounding_scale)||d.rounding_scale===0&&(d.employee_code!=='CN_EMP_HOUSING_FUND'||d.employer_code!=='CN_ER_HOUSING_FUND')))bad('供款舍入须为已支持的明确政策；整元只用于已核住房公积金配对');
     if(input.system!=='CN_PAYROLL'||!Object.values(catalogPairs).some(([a,b])=>a===d.employee_code&&b===d.employer_code))bad('社保公积金须使用已知个人/雇主原子配对，不混岗位工资');
     cnSocialContribution({declaredBase:'0',lower:d.lower,upper:d.upper,employeeRate:d.employee_rate,employerRate:d.employer_rate,employeeApplicable:true,employerApplicable:true,employeeArrears:'0',employerArrears:'0',alreadyEmployeeTarget:'0',alreadyEmployerTarget:'0'});
    }else{
@@ -32,7 +34,7 @@ async function validate(t,input){const d=input.data;if(!d||typeof d!=='object'||
    }
   }
   if(!d.scope_by_item||typeof d.scope_by_item!=='object'||Array.isArray(d.scope_by_item))bad('须逐薪项核定计入或排除，不能默认全部现金都计税/MPF');
-  for(const[code,state]of Object.entries(d.scope_by_item)){const item=await one(t,'SELECT * FROM ty_pay_item_catalog WHERE code=$1',[code]);if(!['include','exclude'].includes(state)||!item)bad('薪税范围须为目录中项目的include/exclude');if(state==='include'&&(!['cash_earnings','reimbursement','noncash_shadow'].includes(item.category)&&item.metadata.employee_cash_wage_effect!=='decrease_gross'||d.type==='HK_MPF_REGULAR'&&item.category==='noncash_shadow'))bad('此薪税模板不能把个人代扣、雇主成本、统计基数或资金采购项目计入收入；非现金待遇须使用已适配的专门口径');}
+  for(const[code,state]of Object.entries(d.scope_by_item)){const item=await one(t,'SELECT * FROM ty_pay_item_catalog WHERE code=$1',[code]);if(!['include','exclude'].includes(state)||!item)bad('薪税范围须为目录中项目的include/exclude');if(state==='include'&&(!['cash_earnings','reimbursement','noncash_shadow'].includes(item.category)&&item.metadata.employee_cash_wage_effect!=='decrease_gross'||d.type.startsWith('HK_MPF_')&&item.category==='noncash_shadow'))bad('此薪税模板不能把个人代扣、雇主成本、统计基数或资金采购项目计入收入；非现金待遇须使用已适配的专门口径');}
  }else if(input.kind==='opening'){
   d.cutoff_period=H.period(d.cutoff_period);text(d.subject_key,'期初实际税供款主体',4);text(d.document_hash,'期初凭据摘要',16);text(d.source_locator,'期初凭据定位',4);
   for(const k of ['income','deductible','basic','special','other','tax_recognized','employee_target','employer_target'])num(d[k]);
@@ -64,9 +66,10 @@ export async function approveStatutoryConfiguration(t,{userId,input,operationId}
 }
 export async function statutoryWorkspace(t,{userId,input}){const rows=await q(t,'SELECT cfg.*,c.name company_name,c.ledger_id FROM ty_pay_stat_config cfg JOIN ty_company c ON c.id=cfg.company_id WHERE cfg.group_id=$1 ORDER BY cfg.id DESC',[id(input.group_id)]),out=[],companies=input.company_id?await companyDescendants(t,id(input.company_id)):null,ledgers=input.ledger_id?await ledgerDescendants(t,id(input.ledger_id)):null;for(const r of rows){if(input.system&&r.system!==input.system||ledgers&&!ledgers.includes(String(r.ledger_id))||input.kind&&input.kind!==r.kind||input.person_id&&input.person_id!=r.person_id||companies&&!companies.includes(String(r.company_id)))continue;const v=await H.project(t,userId,res(r),r,r);if(v)out.push(v);}return paging(search(out,input.q,['stable_key','kind','system']),input);}
 function independent(c,component){const p=c.policy.data,o=c.opening.data,v=c.period_parameters,typ=c.type;
+ if(typ==='HK_MPF_INDUSTRY'){const x=industryCalculation(c),side=component===p.employee_code?'employee':'employer';return{target:x[side].target,initial:o[side+'_target'],state:x[side].state,requiresReversalReview:x[side].requiresReversalReview===true,result:x};}
  if(typ==='CN_IIT'){const x=cnCumulativeIIT({incomeBefore:o.income,deductibleBefore:o.deductible,specialBefore:o.special,otherBefore:o.other,basicBefore:o.basic,taxWithheldBefore:o.tax_recognized,currentIncomeDelta:c.native_income,currentDeductibleDelta:c.native_deductible,currentSpecialDelta:c.native_special,currentOtherDelta:c.native_other,basicForPeriod:c.native_basic,basicAlreadyRecognized:'0',brackets:p.brackets});return{target:x.taxTarget,initial:o.tax_recognized,result:x};}
  const args={lower:p.lower,upper:p.upper,employeeRate:p.employee_rate,employerRate:p.employer_rate,employeeArrears:v.employee_arrears,employerArrears:v.employer_arrears,alreadyEmployeeTarget:o.employee_target,alreadyEmployerTarget:o.employer_target};
- const x=typ==='CN_SOCIAL'?cnSocialContribution({...args,declaredBase:v.declared_base,employeeApplicable:v.employee_eligible,employerApplicable:v.employer_eligible}):hkMpfRegular({...args,schemeType:p.scheme_type,periodType:p.period_type,relevantIncomeCumulative:exactDecimal(fraction(plus(o.income,c.native_income)),12),employeeCap:p.employee_cap,employerCap:p.employer_cap,employeeEligible:v.employee_eligible,employerEligible:v.employer_eligible});
+ const x=typ==='CN_SOCIAL'?cnSocialRounded({...args,declaredBase:v.declared_base,employeeApplicable:v.employee_eligible,employerApplicable:v.employer_eligible,roundingScale:p.rounding_scale??2}):hkMpfRegular({...args,schemeType:p.scheme_type,periodType:p.period_type,relevantIncomeCumulative:exactDecimal(fraction(plus(o.income,c.native_income)),12),employeeCap:p.employee_cap,employerCap:p.employer_cap,employeeEligible:v.employee_eligible,employerEligible:v.employer_eligible});
  const side=component===p.employee_code?'employee':'employer';return{target:x[side].target,initial:o[side+'_target'],state:x[side].state,requiresReversalReview:x[side].requiresReversalReview===true,result:x};
 }
 export async function buildStatutoryLines(t,{userId,batch:b,lines,selections}){

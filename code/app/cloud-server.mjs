@@ -45,6 +45,8 @@ export async function createCloudApp() {
     const report=(label,fallback)=>error=>console.error(label,String(error.code||fallback).replace(/[^A-Z0-9_]/g,'').slice(0,64));
     stops.push(worker.startLearningDeadlineWorker(app.db,{onError:report('学习期限任务暂不可用','E_LEARNING_WORKER')}));
     stops.push(integrationWorker.startIntegrationWorker(app.db,{onError:report('集成任务暂不可用','E_INTEGRATION_WORKER')}));
+    const scriptWorker=await import('./workers/payroll-script-worker.mjs');
+    if(process.env.TYHR_PAYROLL_SCRIPT_SANDBOX==='quickjs-wasm-v1')stops.push(scriptWorker.startPayrollScriptWorker(app.db));
     const stopBackgroundWorkers=()=>Promise.all(stops.map(stop=>stop()));
     app.server.once('close',()=>Promise.resolve(stopBackgroundWorkers()).catch(()=>{}));
     return { ...app, config, stopBackgroundWorkers };

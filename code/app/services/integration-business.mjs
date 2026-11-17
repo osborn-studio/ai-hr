@@ -17,7 +17,7 @@ export async function resolveDelivery(t,{userId,groupId,connection,profile,reque
  return{recipient_external_id:mapping.external_id,recipient_person_id:op.person_id,identity_id:mapping.id,source_hash:sourceHash,source_key:hash({kind:request.source_kind,source,recipient,connection:connection.id}),title:request.source_kind==='workflow_task'?'你有一项待审批事项':'你有一条新的业务提醒',text:request.source_kind==='workflow_task'?'请登录天意人力资源系统查看资料并办理。':'请登录天意人力资源系统查看提醒详情。',url:base.toString(),route};
 }
 export async function directoryReadAuthority(t,{userId,groupId,connection,request}){
- if(!['person','department'].includes(request.entity_kind))bad('目录采集类型须为人员或部门');const mapping=await currentIdentity(t,{connectionId:connection.id,externalKind:'department',externalId:request.department_id});await requireBusinessAccess(t,{userId,groupId,row:mapping,resource:'hr_configuration',fields:['name']});if(connection.provider==='dingtalk'&&request.entity_kind!=='person')bad('钉钉本适配器部门树接口待核，已核部门的直属成员可读取');return{mapping};
+ if(!['person','department'].includes(request.entity_kind))bad('目录采集类型须为人员或部门');const mapping=await currentIdentity(t,{connectionId:connection.id,externalKind:'department',externalId:request.department_id});await requireBusinessAccess(t,{userId,groupId,row:mapping,resource:'hr_configuration',fields:['name']});return{mapping};
 }
 export async function localDirectoryRecord(t,{userId,groupId,identity,action='read'}){
  if(identity.external_kind==='person'){

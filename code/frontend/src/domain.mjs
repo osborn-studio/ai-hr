@@ -66,6 +66,8 @@ export const navigation = [
   { id: 'payroll', name: '薪酬管理', icon: 'wallet', pages: [
     { id: 'payroll', name: '工资计算', subtitle: '批次、试算与核验', ready: true, access: canPayroll },
     { id: 'payroll/rules', name: '工资项目与方案', subtitle: '工资项目、引用与精确公式', ready: true, access: canPayroll },
+    {id:'payroll/scripts',name:'公式代码与触发器',ready:true,access:c=>canRead(c,'payroll_config')},
+    {id:'payroll/finance',name:'工资付款与申报',ready:true,access:c=>canRead(c,'payroll_payment')||canRead(c,'payroll_filing')},
     { id:'payroll/settings', name:'薪酬设置', ready:true, access:c=>canRead(c,'payroll_config')||canPayroll(c) },
     { id: 'payroll/payslips', name: '工资单', ready:true, access: canPayroll },
     { id: 'payroll/tax', name: '薪税与社保', ready:true, access: canPayroll },
@@ -105,8 +107,8 @@ export const navigation = [
     { id: 'people/certificates', ready: true, name: '证件证照', access: canPeople },
     { id: 'people/items', ready: true, name: '物品领用', access: canPeople },
   ] },
-  { id: 'talent', name: '招聘与培训', icon: 'book', pages: [{ id:'talent/recruit',name:'招聘管理',ready:true,access:c=>canRead(c,'hr_recruitment')||canRead(c,'hr_interview') }, { id: 'talent/learning', name: '培训与考试', access: c => canRead(c, 'training_manage') }] },
-  { id: 'services', name: '用工与服务', icon: 'building', pages: [{ id: 'services/vendors', name: '供应商与用工', access: c => canRead(c, 'outsource_ops') }, { id: 'services/dormitory', ready: true, name: '宿舍管理', access: canPeople }] },
+  { id: 'talent', name: '招聘管理', icon: 'book', pages: [{ id:'talent/recruit',name:'招聘管理',ready:true,access:c=>canRead(c,'hr_recruitment')||canRead(c,'hr_interview') }] },
+  { id: 'services', name: '用工与服务', icon: 'building', pages: [{ id: 'services/vendors', name: '供应商与用工', ready:true, access: c => canRead(c, 'outsource_ops')||canRead(c,'outsource_self') }, {id:'services/workforce/reconciliation',name:'服务量与对账',ready:true,access:c=>canRead(c,'outsource_bill')}, {id:'services/workforce/finance',name:'供应商资金',ready:true,access:c=>canRead(c,'outsource_finance')}, {id:'services/workforce/disbursement',name:'工资代发核对',ready:true,access:c=>canRead(c,'outsource_finance')}, {id:'services/workforce/collaboration',name:'用工沟通',ready:true,access:c=>canRead(c,'outsource_ops')||canRead(c,'outsource_self')}, { id: 'services/dormitory', ready: true, name: '宿舍管理', access: canPeople }] },
   { id: 'reports', name: '数据报表', icon: 'chart', pages: [{ id:'reports/cost',name:'人力成本',ready:true,access:c=>canRead(c,'payroll_cost') }] },
   { id: 'personal', name: '我的办理', icon: 'home', bottom: true, pages: [
     { id: 'my/schedule', ready: true, name: '我的排班与考勤', subtitle: '本人安排、打卡与调班申请', access: c => !!c.has_person && canRead(c, 'attendance_self') },

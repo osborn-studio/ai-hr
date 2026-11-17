@@ -10,6 +10,14 @@ const RESOURCE='workflow_manage';
 // Each business adapter reopens its own source and current complete grants.
 // Generic workflow values never substitute for payroll/personnel authority.
 async function businessAdapter(t,type){
+ if(type==='payroll_finance'){
+  if(!(await one(t,"SELECT to_regclass('public.ty_pay_finance_subject')IS NOT NULL ok")).ok)bad('薪酬资金审批尚未安装');
+  const a=await import('./platform-payroll-finance.mjs');return{submit:a.submitFinanceSubject,approve:a.assertFinanceApproval,project:a.projectFinanceInstance,execute:a.executeFinanceSubject,reject:a.rejectFinanceSubject,cancel:a.cancelFinanceSubject};
+ }
+ if(['workforce_profile','workforce_price','workforce_contract','workforce_order','workforce_engagement','workforce_acceptance','workforce_bill','workforce_opening','workforce_bank_receipt','workforce_advance','workforce_payment','workforce_mandate','workforce_instruction','workforce_personal_receipt'].includes(type)){
+  if(!(await one(t,"SELECT to_regclass('public.ty_wf_approval_execution')IS NOT NULL ok")).ok)bad('外包业务审批尚未安装');
+  const a=await import('./platform-workforce.mjs');return{submit:a.submitWorkforceSubject,approve:a.assertWorkforceApproval,project:a.projectWorkforceInstance,execute:a.executeWorkforceSubject,reject:a.rejectWorkforceSubject,cancel:a.cancelWorkforceSubject};
+ }
  if(type==='personal_service'){
   if(!(await one(t,"SELECT to_regclass('public.ty_personal_service_request')IS NOT NULL ok")).ok)bad('个人住宿与领用审批尚未安装');
   const a=await import('./personal-services.mjs');return{submit:a.submitSubject,approve:a.assertApproval,project:a.projectInstance,execute:a.executeSubject,reject:a.rejectSubject,cancel:a.cancelSubject};
