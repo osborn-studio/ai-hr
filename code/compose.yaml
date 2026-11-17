@@ -15,6 +15,12 @@ services:
       TYHR_BROKER_QUERY_URL: "${TYHR_BROKER_QUERY_URL:-}"
       TYHR_BROKER_COMMAND_URL: "${TYHR_BROKER_COMMAND_URL:-}"
       TYHR_BROKER_TOKEN: "${TYHR_BROKER_TOKEN:-}"
+      # In PostgreSQL mode supply persistent 32-byte base64 keys locally.
+      # Keep the original keys with encrypted backups; never commit values.
+      TYHR_INTEGRATION_VAULT_KEY: "${TYHR_INTEGRATION_VAULT_KEY:-}"
+      TYHR_DATA_VAULT_KEY: "${TYHR_DATA_VAULT_KEY:-}"
+      # Opt in only after reviewing and enabling the bounded WASM engine.
+      TYHR_PAYROLL_SCRIPT_SANDBOX: "${TYHR_PAYROLL_SCRIPT_SANDBOX:-}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/livez').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
