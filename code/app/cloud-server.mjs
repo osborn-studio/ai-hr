@@ -37,14 +37,18 @@ export async function createCloudApp() {
   const config = cloudConfiguration();
   if (config.mode === 'broker') return { ...(await createBrokerApp(config)), config };
   const app = await createApp({ apiExtension: createCloudApiExtension(), skipDemoSeed: true });
+  const stops=[];
   try {
     await assertCloudMigrations(app.db);
     attachFrontend(app.server, config.frontendDir);
-    const worker=await import('./workers/learning-worker.mjs');
-    const stopBackgroundWorkers=worker.startLearningDeadlineWorker(app.db,{onError:error=>console.error('学习期限任务暂不可用',String(error.code||'E_LEARNING_WORKER').replace(/[^A-Z0-9_]/g,'').slice(0,64))});
+    const worker=await import('./workers/learning-worker.mjs'),integrationWorker=await import('./workers/integration-worker.mjs');
+    const report=(label,fallback)=>error=>console.error(label,String(error.code||fallback).replace(/[^A-Z0-9_]/g,'').slice(0,64));
+    stops.push(worker.startLearningDeadlineWorker(app.db,{onError:report('学习期限任务暂不可用','E_LEARNING_WORKER')}));
+    stops.push(integrationWorker.startIntegrationWorker(app.db,{onError:report('集成任务暂不可用','E_INTEGRATION_WORKER')}));
+    const stopBackgroundWorkers=()=>Promise.all(stops.map(stop=>stop()));
     app.server.once('close',()=>Promise.resolve(stopBackgroundWorkers()).catch(()=>{}));
     return { ...app, config, stopBackgroundWorkers };
-  } catch (error) { await app.db.close(); throw error; }
+  } catch (error) { await Promise.all(stops.map(stop=>stop()));await app.db.close(); throw error; }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
