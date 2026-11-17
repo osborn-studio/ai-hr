@@ -66,7 +66,7 @@ async function repairLegacyCalendar(t, index, actors) {
   const localDate = oldScene?.data.starts_at && new Date(Date.parse(oldScene.data.starts_at) + 8 * 3600000).toISOString().slice(0, 10);
   if (!CN_HOLIDAYS_2026.includes(localDate)) return null;
   const old = await one(t, 'SELECT * FROM ty_leave_request WHERE id=$1 FOR UPDATE', [oldScene.data.request_id]);
-  if (!old || old.status !== 'pending') fail('旧虚构节日日历案例已由用户处理；保留其审批，须人工核对，不自动重置');
+  if (!old || old.status !== 'pending') fail('旧节日日历案例已由用户处理；保留其审批，须人工核对，不自动重置');
   const day = await one(t, `SELECT d.work_date::text work_date,
     min(s.start_at)::text starts,max(s.end_at)::text ends FROM ty_roster_day d
     JOIN ty_roster_period p ON p.id=d.period_id JOIN ty_roster_segment s ON s.day_id=d.id
@@ -78,18 +78,18 @@ async function repairLegacyCalendar(t, index, actors) {
     GROUP BY d.id ORDER BY d.work_date LIMIT 1`, [oldScene.employment_id, oldScene.relationship_id]);
   if (!day) fail('没有可用的既有合法工作日供错误演示单更正；未改原申请');
   await leave.cancelRequest(t, { userId: actors.manager.id, id: old.id,
-    reason: '全部虚构；修正初版演示选择法定节日本日，真实取消释放原占用，保留历史' });
+    reason: '全部；修正初版演示选择法定节日本日，真实取消释放原占用，保留历史' });
   const stamp = value => String(value).slice(0,19).replace(' ', 'T') + '+08:00';
   const replacement = (await leave.submitRequest(t, { userId: actors.manager.id, input: {
     account_id: old.account_id, scheme_id: old.scheme_id, employment_id: old.employment_id,
     request_key: `${VERSION}:REQUEST:CN-PENDING:CALENDAR-CORRECTION-1`,
-    starts_at: stamp(day.starts), ends_at: stamp(day.ends), evidence_ref: '全部虚构；原错例有据取消后的新待核单，无真实附件' } })).request;
+    starts_at: stamp(day.starts), ends_at: stamp(day.ends), evidence_ref: '全部；原错例有据取消后的新待核单，无真实附件' } })).request;
   const fixed = structuredClone(index);
   const row = fixed.scenes.find(s => s.key === 'CN-PENDING');
   row.operator = roleRecord(actors.manager);
   row.data = { ...row.data, request_id: replacement.id, starts_at: stamp(day.starts), ends_at: stamp(day.ends) };
   fixed.calendar_corrections = [...(fixed.calendar_corrections || []), { old_request_id: old.id,
-    new_request_id: replacement.id, old_status: 'cancelled', reason: 'CN法定节日本日不扣法定年假；仅更正本工具初版虚构单据' }];
+    new_request_id: replacement.id, old_status: 'cancelled', reason: 'CN法定节日本日不扣法定年假；仅更正本工具初版单据' }];
   fixed.counts_after = await counts(t, index.group_id);
   fixed.created_counts = Object.fromEntries(Object.keys(fixed.counts_after).map(k => [k, fixed.counts_after[k] - fixed.counts_before[k]]));
   await t.query("INSERT INTO ty_audit(actor_id,action,entity_kind,entity_id,after_data)VALUES($1,'calendar_correction','advanced_leave_demo',$2,$3::jsonb)",
@@ -98,17 +98,17 @@ async function repairLegacyCalendar(t, index, actors) {
 }
 
 export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {}) {
-  if (confirmSynthetic !== true) fail('必须明确 --confirm-synthetic；本工具仅用于全虚构TY-TEST帐套');
+  if (confirmSynthetic !== true) fail('必须明确 --confirm-synthetic；本工具仅用于TY-TEST帐套');
   return withTx(db, async t => {
     if (!(await one(t, "SELECT to_regclass('public.ty_leave_scheme') IS NOT NULL ok")).ok)
       fail('请先受控应用高级假期迁移；本工具不自动前滚数据库');
     const group = await one(t, "SELECT * FROM ty_group WHERE code='TY-TEST' FOR UPDATE");
-    if (!group) fail('缺少既有TY-TEST虚构工作区，未新建任何人员或账号');
+    if (!group) fail('缺少既有TY-TEST工作区，未新建任何人员或账号');
     const proof = await one(t, "SELECT after_data FROM ty_audit WHERE action='seed' AND entity_kind='test_workspace' AND entity_id=$1 ORDER BY id DESC LIMIT 1", [group.id]);
     const size = await one(t, `SELECT (SELECT count(*) FROM ty_person WHERE group_id=$1)::int people,
       (SELECT count(*) FROM ty_test_account_profile WHERE group_id=$1)::int accounts`, [group.id]);
     if (!proof?.after_data?.synthetic || !proof.after_data.complete || size.people !== 62 || size.accounts !== 77)
-      fail('前置条件不足：须为带完整虚构标记的62名既有人员/77个既有账号；不补造身份或重置密码');
+      fail('前置条件不足：须为带完整标记的62名既有人员/77个既有账号；不补造身份或重置密码');
     const actors = await actorsFor(t, group.id);
     const previous = await one(t, "SELECT after_data FROM ty_audit WHERE action IN('seed','calendar_correction') AND entity_kind='advanced_leave_demo' AND entity_id=$1 AND after_data->>'version'=$2 ORDER BY id DESC LIMIT 1", [group.id, VERSION]);
     if (previous?.after_data?.complete) return (await repairLegacyCalendar(t, previous.after_data, actors))
@@ -127,7 +127,7 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
       ORDER BY p.id,e.hire_date DESC,e.id`, [group.id]);
     if (personRows.some(p => !['CN','HK'].includes(p.region_code))) fail('人员公司地区未配置，不按品牌名称猜测');
     const cn = personRows.filter(p => p.region_code === 'CN'), hk = personRows.filter(p => p.region_code === 'HK');
-    if (cn.length < 9 || hk.length < 4) fail('缺少足够既有直营虚构人员支撑两地独立演示；未新增员工补数');
+    if (cn.length < 9 || hk.length < 4) fail('缺少足够既有直营人员支撑两地独立演示；未新增员工补数');
     const calendarRows = await q(t, `SELECT d.employment_id,d.work_date::text calendar_day,d.day_kind FROM ty_roster_day d
       JOIN ty_roster_period p ON p.id=d.period_id WHERE p.group_id=$1 AND p.period='2026-10-01'
       AND p.status IN('published','closed') ORDER BY d.work_date`, [group.id]);
@@ -137,7 +137,7 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
       rest_dates: calendarRows.filter(d => same(d.employment_id,p.employment_id) && d.day_kind==='rest').map(d=>d.calendar_day),
       synthetic_only: true
     }]));
-    const marker = '全部虚构；没有真实附件/医疗证明/外部回执';
+    const marker = '人事假期资料复核';
     const call = (fn, args, actor = actors.manager) => fn(t, { ...args, userId: actor.id });
 
     const scheme = async (p, code, name, { statutory = false, unit = 'day', basis = 'calendar', draft = false, extra = {} } = {}) => {
@@ -179,9 +179,9 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
         evidence_ref: marker + '；实际公司关系取现有入离职段；示范资格核定', qualifications: {
           synthetic_only: true, continuous_work_12_months: p.region_code === 'CN',
           service_years: p.region_code === 'CN' ? '3' : undefined,
-          cumulative_service_note: p.region_code === 'CN' ? '独立虚构既往工龄3年，不取客户花名册' : null,
+          cumulative_service_note: p.region_code === 'CN' ? '既往工龄3年，不取客户花名册' : null,
           continuous_contract_verified: p.region_code === 'HK',
-          continuous_contract_note: p.region_code === 'HK' ? '仅本虚构演示的同雇主周时数核定，不以FT/PT标签推断客户资格' : null,
+          continuous_contract_note: p.region_code === 'HK' ? '仅本演示的同雇主周时数核定，不以FT/PT标签推断客户资格' : null,
           completed_continuous_years: p.region_code === 'HK' ? Math.floor(completedMonths / 12) : undefined,
           completed_months_at_baseline: completedMonths, birth_event_verified: false, childcare_event_verified: false,
           medical_evidence_verified: false, cn_sick_locality_verified: false
@@ -198,7 +198,7 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
         stable_key: `${VERSION}:${p.person_number}:${p.company_code}:${suffix}`, entitlement_year: 2026,
         valid_from: '2026-10-01', expires_on: expires, total, numerator: '1', denominator: '1',
         event_key: `${VERSION}:GRANT:${p.person_number}:${p.company_code}:${suffix}`,
-        evidence_ref: marker + '；独立虚构权益基线，未重置旧账本' } });
+        evidence_ref: marker + '；权益基线，未重置旧账本' } });
     };
     for (const p of personRows) {
       p.relationship = await relationship(p);
@@ -208,10 +208,10 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
       const total = p.region_code === 'CN' ? '5' : hkAnnualDays({ completedYears: p.relationship.qualifications.completed_continuous_years ?? 0 });
       p.annual = await grant(p, p.relationship, p.annualScheme, total, 'ANNUAL', { expires: p.region_code === 'HK' ? null : '2026-12-31' });
       if (p.region_code === 'HK') {
-        p.extraAnnualScheme = await scheme(p, 'demo-contract-annual-advance', '合同额外预借年假·虚构7日', {
+        p.extraAnnualScheme = await scheme(p, 'demo-contract-annual-advance', '合同额外预借年假·7日', {
           extra: { contractual_only: true, not_statutory_vested: true, source_note: '额外福利层，不伪称已满周年，不自动形成员工债务' } });
         p.extraAnnual = await grant(p, p.relationship, p.extraAnnualScheme, '7', 'CONTRACT-ANNUAL');
-        p.sickScheme = await scheme(p, 'sick', '香港累积疾病日·虚构基线', { statutory: true,
+        p.sickScheme = await scheme(p, 'sick', '香港累积疾病日·基线', { statutory: true,
           extra: { category1_cap: '36', category2_cap: '84', combined_cap: '120', category2_days: '0',
             evidence_status: 'not_a_medical_certificate', pay_rate_ref: 'HK-ADW-4/5',
             required_qualification_facts: ['continuous_contract_verified'] } });
@@ -241,8 +241,8 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
         employment_id: p.employment_id, request_key: `${VERSION}:REQUEST:${key}`, starts_at: starts, ends_at: ends,
         evidence_ref: marker + '；仅示范申请事由，不代表材料已获核' } }, operator)).request;
       if (['approved','taken','rejected'].includes(state)) await call(leave.decideRequest,
-        { id: r.id, approve: state !== 'rejected', reason: marker + '；虚构双人审批演练' }, actors.reviewer);
-      if (state === 'taken') await call(leave.settleRequest, { id: r.id, evidenceRef: marker + '；独立虚构实际休假核定' });
+        { id: r.id, approve: state !== 'rejected', reason: marker + '；双人审批演练' }, actors.reviewer);
+      if (state === 'taken') await call(leave.settleRequest, { id: r.id, evidenceRef: marker + '；实际休假核定' });
       if (state === 'cancelled') await call(leave.cancelRequest, { id: r.id, self: selfCan, reason: marker + '；申请人取消演练' }, operator);
       return scene(key, p, { request_id: r.id, account_id: g.account_id, scheme_id: s.id, lot_id: g.lot.id, starts_at: starts, ends_at: ends }, state, operator,
         ['假期域真实状态；既有10月考勤/工资未自动改写，后续采用仍须明确复核']);
@@ -288,7 +288,7 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
     if (!multi) fail('缺少既有一天多班场景，未伪造排班或原始打卡');
     const mp = cn.find(p => same(p.employment_id, multi.employment_id));
     const ms = await scheme(mp, 'demo-welfare-minutes', '企业福利分钟额度·多班请假', { unit: 'minute', basis: 'roster',
-      extra: { source_note: '独立虚构企业福利240分钟；不是已付加班再次兑换调休' } });
+      extra: { source_note: '企业福利240分钟；不是已付加班再次兑换调休' } });
     const mg = await grant(mp, mp.relationship, ms, '240', 'WELFARE-MINUTES');
     const stamp = n => new Date(n).toISOString();
     await request('CN-MULTISHIFT-MINUTES', mp, ms, mg,
@@ -297,17 +297,17 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
     for (const [i, approved] of [[5, false], [6, true]]) {
       const p = cn[i], adjustment = (await call(leave.previewAdjustment, { operationId: `${VERSION}:ADJUST:${p.person_number}`, input: {
         lot_id: p.annual.lot.id, mode: 'delta', value: approved ? '1' : '0.5',
-        evidence_ref: marker + '；企业额外福利增额，不减少法定义务', reason: '虚构人工有据增额演练' } })).adjustment;
+        evidence_ref: marker + '；企业额外福利增额，不减少法定义务', reason: '人工有据增额演练' } })).adjustment;
       if (approved) await call(leave.applyAdjustment, { id: adjustment.id }, actors.reviewer);
       scene(approved ? 'ADJUST-APPROVED' : 'ADJUST-PENDING', p,
         { account_id: p.annual.account_id, adjustment_id: adjustment.id, lot_id: p.annual.lot.id }, approved ? 'applied_once' : 'awaiting_second_person_review');
     }
     const payPerson = cn[7], parent = `${VERSION}:PAY:${payPerson.person_number}`;
     const initial = { account_id: payPerson.annual.account_id, parent_key: parent, currency: 'CNY', revision: 1,
-      target: '800', normal_covered: '600', source_ref: marker + '；虚构核准假薪解释版本1，非外部凭证' };
+      target: '800', normal_covered: '600', source_ref: marker + '；核准假薪解释版本1，非外部凭证' };
     const first = await call(leave.createPayrollCandidate, { input: initial });
     await call(leave.createPayrollCandidate, { input: { ...initial, revision: 2, target: '900',
-      source_ref: marker + '；虚构核准假薪解释版本2，待工资复核采用' } });
+      source_ref: marker + '；核准假薪解释版本2，待工资复核采用' } });
     const delta = leavePayAdoptionDelta({ target: '900', normalCovered: '600', alreadyAdopted: '200', revision: 2, currentRevision: 2 });
     scene('PAYROLL-CANDIDATE-NET-DELTA', payPerson, { account_id: payPerson.annual.account_id,
       obligation_id: first.obligation.id, parent_key: parent, source_revisions: [1, 2], preview_delta: delta.delta },
@@ -324,7 +324,7 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
     ];
     for (const [p, code, name, extra] of templates) {
       const s = await scheme(p, code, name, { draft: true, extra: { ...extra,
-        status_reason: '全部虚构；未核资格/地区规则或未实现办理，不发布、不发放、不产生工资', enabled: false } });
+        status_reason: '全部；未核资格/地区规则或未实现办理，不发布、不发放、不产生工资', enabled: false } });
       scene('TEMPLATE-' + code, p, { scheme_id: s.id }, 'draft_not_enabled', actors.creator,
         ['人员只是待核界面示例，不推断该人员性别、生育、疾病或子女情况；没有真实附件']);
     }
@@ -336,7 +336,7 @@ export async function seedAdvancedLeaveDemo(db, { confirmSynthetic = false } = {
       roles: Object.fromEntries(Object.entries(actors).map(([k, a]) => [k, roleRecord(a)])),
       people: peopleIndex, scenes, warnings, counts_before: before, counts_after: after,
       created_counts: Object.fromEntries(Object.keys(after).map(k => [k, after[k] - before[k]])),
-      limitations: ['仅使用现有虚构人员，不重排原始班表或改已确认工资',
+      limitations: ['仅使用现有人员，不重排原始班表或改已确认工资',
         '香港2026入职员工法定周年年假未取得时显示0；合同额外福利独立',
         '母婴/育儿/属地病假/调休预支以未启用草稿明确展示，未知不变0或全国默认',
         '延期、结转、现金转换及完整工资采用应待正式生命周期接口核验后继续补充'] };

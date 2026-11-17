@@ -12,14 +12,14 @@ const q=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows;
 const same=(a,b)=>String(a)===String(b);
 const fail=m=>{throw bizErr('E_TY_CONFLICT',m);};
 const roleSpecs=[
- {login:'admin',display_name:'系统配置管理员（虚构）',profile_code:'config_admin',role:'ty_demo_config',role_name:'系统配置管理员',scope:'none',write:true},
- {login:'demo',display_name:'全权限演示账号（虚构）',profile_code:'demo',role:'admin',role_name:'全部权限演示',scope:'group',write:true},
- {login:'boss',display_name:'集团老板（虚构）',profile_code:'boss',role:'boss',role_name:'老板·集团只读',scope:'group',write:false},
- {login:'hr_manager',display_name:'HR主管（虚构职能账号）',profile_code:'hr_manager',role:'ty_demo_hr_manager',role_name:'HR主管',scope:'group',write:true},
- {login:'recruiter',display_name:'招聘专员（虚构职能账号）',profile_code:'recruiter',role:'ty_demo_recruiter',role_name:'招聘专员',scope:'group',write:false},
- {login:'payroll',display_name:'薪酬专员（虚构职能账号）',profile_code:'payroll',role:'ty_demo_payroll',role_name:'薪酬专员',scope:'group',write:true},
- {login:'trainer',display_name:'培训专员（虚构职能账号）',profile_code:'trainer',role:'ty_demo_trainer',role_name:'培训专员',scope:'group',write:false},
- {login:'hr_staff',display_name:'普通HR（虚构职能账号）',profile_code:'hr_staff',role:'ty_demo_hr_staff',role_name:'普通HR人员',scope:'group',write:true},
+ {login:'admin',display_name:'系统配置管理员',profile_code:'config_admin',role:'ty_demo_config',role_name:'系统配置管理员',scope:'none',write:true},
+ {login:'demo',display_name:'全权限演示账号',profile_code:'demo',role:'admin',role_name:'全部权限演示',scope:'group',write:true},
+ {login:'boss',display_name:'集团老板',profile_code:'boss',role:'boss',role_name:'老板·集团只读',scope:'group',write:false},
+ {login:'hr_manager',display_name:'HR主管',profile_code:'hr_manager',role:'ty_demo_hr_manager',role_name:'HR主管',scope:'group',write:true},
+ {login:'recruiter',display_name:'招聘专员',profile_code:'recruiter',role:'ty_demo_recruiter',role_name:'招聘专员',scope:'group',write:false},
+ {login:'payroll',display_name:'薪酬专员',profile_code:'payroll',role:'ty_demo_payroll',role_name:'薪酬专员',scope:'group',write:true},
+ {login:'trainer',display_name:'培训专员',profile_code:'trainer',role:'ty_demo_trainer',role_name:'培训专员',scope:'group',write:false},
+ {login:'hr_staff',display_name:'普通HR',profile_code:'hr_staff',role:'ty_demo_hr_staff',role_name:'普通HR人员',scope:'group',write:true},
 ];
 
 async function newScope(tx,name,bindings,mode) {

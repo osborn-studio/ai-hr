@@ -7,6 +7,16 @@ export function portError(code, message, status = 400) {
 }
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const NAME = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+// An 8MB original becomes about 11.2MB in a JSON Base64 envelope.
+// Bound the actual received bytes, including streamed responses.
+async function boundedBrokerText(response){
+ const limit=16*1024*1024,declared=Number(response.headers?.get?.('content-length'));
+ if(Number.isFinite(declared)&&declared>limit)throw new Error('response limit');
+ if(!response.body?.getReader){const text=await response.text();if(Buffer.byteLength(text)>limit)throw new Error('response limit');return text;}
+ const reader=response.body.getReader(),chunks=[];let size=0;
+ try{for(;;){const{done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit){await reader.cancel();throw new Error('response limit');}chunks.push(value);}}finally{reader.releaseLock();}
+ return Buffer.concat(chunks,size).toString('utf8');
+}
 
 function endpoint(value, name) {
   let url;
@@ -34,8 +44,7 @@ export function createBrokerClient({ capabilitiesUrl, queryUrl, commandUrl, toke
         headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...(kind === 'capabilities' ? {} : { 'content-type': 'application/json' }) },
         ...(kind === 'capabilities' ? {} : { body: JSON.stringify(envelope) }),
       });
-      const raw = await response.text();
-      if (raw.length > 4 * 1024 * 1024) throw new Error('response limit');
+      const raw = await boundedBrokerText(response);
       let body;
       try { body = JSON.parse(raw); } catch { throw new Error('invalid response'); }
       if (!response.ok) {

@@ -10,12 +10,12 @@ const surname=['周','陈','许','郑','王','顾','陆','程','叶','林','沈'
 const given=['嘉禾','知宁','锦安','亦辰','沐言','景和','清越','舒然','承宇','星澄','予安','思远','云舒','明轩','芷晴','若涵','子衡','悦宁','文熙','佳音','向晨','以安','欣然','晓棠','奕川','书瑶','可欣','语桐','雨澄','安禾','知行'];
 const functionNames={boss:'林景行',group_hr_director:'熊知衡',company_hr_director:'宋知远',hk_hr_director:'刘和安',store_hr_director:'章知礼',hr_manager:'何仁杰',recruiter:'齐昭宁',payroll:'沈新瑜',trainer:'田沛然',hr_staff:'陆仁和'};
 export async function seed(t,{userId,input,passwordFactory=()=>randomBytes(12).toString('base64url')}){
- if(input?.confirm_synthetic!==true)throw bizErr('E_TY_ARGUMENT','必须明确仅创建虚构供应商、人员姓名、合同、账单和消息');
+ if(input?.confirm_synthetic!==true)throw bizErr('E_TY_ARGUMENT','必须明确仅创建供应商、人员姓名、合同、账单和消息');
  const a=await foundation.accessFor(t,userId);if(!a.platformAdmin)throw bizErr('E_TY_FORBIDDEN','仅由演示全权限或技术初始化执行');
  const g=(await q(t,"SELECT * FROM ty_group WHERE code='TY-TEST' FOR UPDATE"))[0];if(!g)throw bizErr('E_TY_ARGUMENT','缺少天意集团测试工作区');
  const marker=(await q(t,"SELECT * FROM ty_audit WHERE entity_kind='outsourcing_demo' AND entity_id=$1 AND action='seed'",[g.id]))[0];if(marker)return{...marker.after_data,already_exists:true,created_accounts:[]};
  const people=await q(t,`SELECT p.*,e.id employment_id,e.company_id,e.employment_type,cp.code position_code,j.code job_code FROM ty_person p JOIN ty_employment e ON e.person_id=p.id AND e.status='active' JOIN ty_position_assignment pa ON pa.employment_id=e.id AND pa.is_primary AND pa.status='active' JOIN ty_company_position cp ON cp.id=pa.position_id JOIN ty_job j ON j.id=cp.job_id WHERE p.group_id=$1 ORDER BY p.id,e.hire_date`,[g.id]);
- const unique=[];for(const p of people)if(!unique.some(x=>same(x.id,p.id)))unique.push(p);if(unique.length!==62)throw bizErr('E_TY_CONFLICT','仅处理62人虚构帐套，不导入其他人员');
+ const unique=[];for(const p of people)if(!unique.some(x=>same(x.id,p.id)))unique.push(p);if(unique.length!==62)throw bizErr('E_TY_CONFLICT','仅处理62人帐套，不导入其他人员');
  for(let i=0;i<unique.length;i++){
   const p=unique[i];const name=surname[i%surname.length]+given[(i*7+Math.floor(i/surname.length)*3)%given.length];
   await t.query('INSERT INTO ty_demo_name_assignment(person_id,full_name,version,assigned_by)VALUES($1,$2,$3,$4)',[p.id,name,VERSION,userId]);
@@ -32,7 +32,7 @@ export async function seed(t,{userId,input,passwordFactory=()=>randomBytes(12).t
   await t.query('INSERT INTO ty_test_account_profile(account_id,group_id,profile_code,seed_version)VALUES($1,$2,$3,$4)',[acc.id,g.id,profile,VERSION]);
   const sid=(await q(t,"INSERT INTO sys_data_scope(id,name,combinator)SELECT max(id)+1,$1,'intersection'FROM sys_data_scope RETURNING id",[name+'外包门户范围']))[0].id;
   for(const dim of ['cost_org','attendance_org','payroll_legal_entity','si_entity'])await t.query("INSERT INTO sys_data_scope_rule(data_scope_id,dimension,value_type,value_ids)VALUES($1,$2,'none','{}')",[sid,dim]);
-  await t.query("INSERT INTO sys_user_role(user_id,role_id,data_scope_id,effective_from,grant_kind,grant_reason)SELECT $1,id,$2,'2026-01-01','ROLE','全虚构外包演示门户'FROM sys_role WHERE code=$3",[acc.id,sid,role]);
+  await t.query("INSERT INTO sys_user_role(user_id,role_id,data_scope_id,effective_from,grant_kind,grant_reason)SELECT $1,id,$2,'2026-01-01','ROLE','外包演示门户'FROM sys_role WHERE code=$3",[acc.id,sid,role]);
   if(supplierId)await t.query('INSERT INTO ty_outsource_portal_user(account_id,group_id,supplier_id)VALUES($1,$2,$3)',[acc.id,g.id,supplierId]);
   else await t.query("INSERT INTO ty_access_grant(account_id,group_id,can_read,can_write,valid_from)VALUES($1,$2,true,true,'2026-01-01')",[acc.id,g.id]);
   accounts.push({account_id:acc.id,login,password});return acc;
@@ -40,13 +40,13 @@ export async function seed(t,{userId,input,passwordFactory=()=>randomBytes(12).t
  const coordinator=await account('outsource_hr','许和宁','outsource_hr','ty_outsource_hr');
  const vendors=[],contracts=[],converted=[],agency=[];
  for(const[region,index]of [['CN',0],['HK',1]]){
-  const currency=region==='CN'?'CNY':'HKD',name=region==='CN'?'和川人事服务有限公司（演示）':'海岚人事服务有限公司（香港演示）';
-  const supplier=(await outsourcing.saveSupplier(t,{userId,input:{group_id:g.id,code:'SYN-VENDOR-'+region,name,region_code:region,currency_code:currency,qualification_status:'verified',qualification_ref:'SYN-QUAL-'+region,qualification_valid_to:'2027-12-31',contacts:[{name:index?'陈协宁':'顾协安',role:'供应商服务经理',phone:'000-0000-0000',email:`vendor-${region.toLowerCase()}@example.invalid`}],billing_title:name,bank_name:'演示银行，不可转账',bank_account_last4:index?'0002':'0001',notes:'内部合成供应商评价：及时率与服务质量仅作测试，不向供应商展示此内部备注'}})).row;
+  const currency=region==='CN'?'CNY':'HKD',name=region==='CN'?'和川人事服务有限公司':'海岚人事服务有限公司';
+  const supplier=(await outsourcing.saveSupplier(t,{userId,input:{group_id:g.id,code:'SYN-VENDOR-'+region,name,region_code:region,currency_code:currency,qualification_status:'verified',qualification_ref:'SYN-QUAL-'+region,qualification_valid_to:'2027-12-31',contacts:[{name:index?'陈协宁':'顾协安',role:'供应商服务经理',phone:'000-0000-0000',email:`vendor-${region.toLowerCase()}@example.invalid`}],billing_title:name,bank_name:'海桥商业银行',bank_account_last4:index?'0002':'0001',notes:'季度评价：到岗及时率达标，厨房清洁交接记录仍需持续抽查；本条仅供内部复核'}})).row;
   vendors.push(supplier);const portal=await account(index?'vendor_hk':'vendor_cn',index?'陈协宁':'顾协安','vendor_contact','ty_vendor_contact',supplier.id);
   const companies=(await q(t,"SELECT c.*,loc.region_code FROM ty_company c CROSS JOIN LATERAL fn_ty_company_locale(c.id)loc WHERE c.group_id=$1 AND c.company_kind='store' ORDER BY c.id",[g.id])).filter(c=>c.region_code===region);
   const companyIds=companies.map(c=>c.id);
-  const payrollContract=(await outsourcing.saveContract(t,{userId,input:{group_id:g.id,supplier_id:supplier.id,code:'SYN-PAY-AGENCY-'+region,name:`${region}薪酬代发与人事服务演示`,service_kind:'payroll_agency',valid_from:'2026-10-01',valid_to:'2027-12-31',company_ids:companyIds,share_payroll_details:true,pricing:{mode:'per_person',service_fee:index?120:80,currency,tax_fee_mode:'explicit_manual',payment_channel:'银行代发演示'},terms:'原劳动关系保持在各门店公司；仅代发和人事服务。工资资金、个人与单位供款、服务费分别对账。全部为虚构，没有付款或真实开票。'}})).row;contracts.push(payrollContract);
-  const serviceContract=(await outsourcing.saveContract(t,{userId,input:{group_id:g.id,supplier_id:supplier.id,code:'SYN-STAFF-'+region,name:`${region}厨房清洁与备餐服务外包演示`,service_kind:'staffing_outsource',valid_from:'2026-11-16',valid_to:'2027-12-31',company_ids:companyIds,pricing:{mode:'accepted_service_hours',unit_price:index?125:48,currency,service_fee_mode:'included',tax_fee_mode:'explicit_manual'},terms:'供应商承担服务人员的雇主职责，门店记录服务场所及验收；与内部直属劳动合同、劳务派遣和工资代发分别建档，不因外包标签推定法律资格。11月16日起的服务另行确认，不使用10月直营工时冒充外包服务。'}})).row;contracts.push(serviceContract);
+  const payrollContract=(await outsourcing.saveContract(t,{userId,input:{group_id:g.id,supplier_id:supplier.id,code:'SYN-PAY-AGENCY-'+region,name:`${region}薪酬代发与人事服务协议`,service_kind:'payroll_agency',valid_from:'2026-10-01',valid_to:'2027-12-31',company_ids:companyIds,share_payroll_details:true,pricing:{mode:'per_person',service_fee:index?120:80,currency,tax_fee_mode:'explicit_manual',payment_channel:'银行代发'},terms:'原劳动关系保持在各门店公司；仅代发和人事服务。工资资金、个人与单位供款、服务费分别对账。对账确认、发票登记与资金回执分别办理。'}})).row;contracts.push(payrollContract);
+  const serviceContract=(await outsourcing.saveContract(t,{userId,input:{group_id:g.id,supplier_id:supplier.id,code:'SYN-STAFF-'+region,name:`${region}厨房清洁与备餐服务协议`,service_kind:'staffing_outsource',valid_from:'2026-11-16',valid_to:'2027-12-31',company_ids:companyIds,pricing:{mode:'accepted_service_hours',unit_price:index?125:48,currency,service_fee_mode:'included',tax_fee_mode:'explicit_manual'},terms:'供应商承担服务人员的雇主职责，门店记录服务场所及验收；与内部直属劳动合同、劳务派遣和工资代发分别建档，不因外包标签推定法律资格。11月16日起的服务另行确认，不使用10月直营工时冒充外包服务。'}})).row;contracts.push(serviceContract);
   const regionPeople=unique.filter(p=>companyIds.some(id=>same(id,p.company_id)));
   const workers=regionPeople.filter(p=>p.job_code==='SYN-CHEF').slice(0,3);
   for(const p of workers){
@@ -64,7 +64,7 @@ export async function seed(t,{userId,input,passwordFactory=()=>randomBytes(12).t
   }
   const payrollPeople=regionPeople.filter(p=>p.job_code==='SYN-SERVICE').slice(0,2);
   for(const p of payrollPeople){const en=(await q(t,"INSERT INTO ty_outsource_engagement(contract_id,person_id,company_id,employment_id,valid_from,service_role,legal_employer_name,created_by)VALUES($1,$2,$3,$4,'2026-10-01','直营员工薪酬代发服务',$5,$6)RETURNING *",[payrollContract.id,p.id,p.company_id,p.employment_id,(await q(t,'SELECT name FROM ty_company WHERE id=$1',[p.company_id]))[0].name,userId]))[0];agency.push(en);}
-  const bill=(await outsourcing.createBill(t,{userId,input:{group_id:g.id,contract_id:payrollContract.id,period:'2026-10',note:'10月工资资金与服务费对账，全虚构未付款；税费未推定，另按合同明确。'}})).bill;
+  const bill=(await outsourcing.createBill(t,{userId,input:{group_id:g.id,contract_id:payrollContract.id,period:'2026-10',note:'10月工资资金与服务费对账，待付款；税费未推定，另按合同明确。'}})).bill;
   const rows=await q(t,"SELECT r.* FROM ty_time_payroll_link l JOIN ty_payroll_row r ON r.batch_id=l.batch_id WHERE l.region_code=$1 AND r.person_id=ANY($2::bigint[])",[region,payrollPeople.map(p=>p.id)]);
   if(rows.length!==2)throw new Error('Expected two locked October payroll sources for agency billing');
   for(const r of rows){for(const[code,component,label]of [['employee_net','net_pay','员工净薪代发资金'],['employee_contribution','employee_contribution','员工个人供款代缴资金'],['employer_contribution','employer_contribution','企业供款代缴资金'],...(region==='CN'?[['withheld_tax','cn_tax','个人所得税代缴资金']]:[])]){

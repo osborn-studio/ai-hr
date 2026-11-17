@@ -2,3 +2,5 @@
 .payroll-workbench th,.payroll-workbench td,.native-payroll-batch th,.native-payroll-batch td{white-space:nowrap}.payroll-workbench .table-scroll table,.native-payroll-batch .table-scroll table{min-width:760px}.payroll-config-detail dl{display:grid;grid-template-columns:minmax(110px,1fr) minmax(180px,3fr);gap:8px 18px;padding:10px;border-left:2px solid #d5b96d}.payroll-config-detail dt{color:#607491}.payroll-config-detail dd{margin:0;overflow-wrap:anywhere}.payroll-config-detail details{padding:8px 0}.payroll-config-detail summary{cursor:pointer;color:#24518f}
 .payroll-configuration fieldset{border:0;padding:0;margin:0;width:100%}.payroll-configuration .table-pagination label{white-space:nowrap;display:flex;align-items:center;gap:6px}.payroll-configuration .table-pagination span{white-space:nowrap}
 .business-form fieldset {border:0;margin:0;padding:0;min-width:0;}
+
+.payroll-configuration .checkbox input{width:15px;min-height:15px;flex:none}.payroll-configuration .checkbox{display:flex;flex-direction:row;align-items:center;gap:9px;margin:10px 0}

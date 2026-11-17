@@ -1,0 +1,4 @@
+import test from'node:test';import assert from'node:assert/strict';import{decimal,cleanAnswers,answerSummary,stateName}from'../src/learning-model.mjs';
+test('learning scores and money preserve decimal strings',()=>{assert.equal(decimal('1234.5600000001'),'1234.5600000001');for(const v of['','-1','1e3','NaN','0.12345678901'])assert.throws(()=>decimal(v));});
+test('only actual frozen paper question references enter an answer payload',()=>{assert.deepEqual(cleanAnswers([{id:'11'},{id:'12'}],{'11':['A','C'],'777':'not-on-paper'}),{'11':['A','C']});});
+test('answer receipt and submitted result are distinctly described',()=>{assert.match(answerSummary({status:'in_progress',answer_revision:3}),/第 3 版/);assert.match(answerSummary({status:'submitted',answer_revision:3}),/不能继续更改/);assert.equal(stateName('approved'),'已核准');assert.equal(stateName('published'),'已发布');});

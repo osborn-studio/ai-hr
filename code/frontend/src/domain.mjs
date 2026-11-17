@@ -89,6 +89,13 @@ export const navigation = [
     {id:'performance/bonus',name:'绩效与奖金',ready:true,access:c=>canRead(c,'perf_bonus')},
     {id:'performance/settings',name:'绩效设置',ready:true,access:c=>canConfigureResource(c,'perf_config')},
   ] },
+  {id:'learning',name:'培训与考试',icon:'book',pages:[
+    {id:'learning/courses',name:'课程与培训内容',ready:true,access:c=>canRead(c,'learning_config')||canRead(c,'learning_manage')},
+    {id:'learning/plans',name:'培训计划与学时',ready:true,access:c=>canRead(c,'learning_manage')},
+    {id:'learning/exams',name:'题库与考试',ready:true,access:c=>canRead(c,'learning_config')||canRead(c,'learning_manage')},
+    {id:'learning/grading',name:'阅卷、成绩与申诉',ready:true,access:c=>canRead(c,'learning_grade')||canRead(c,'learning_publish')},
+    {id:'learning/qualifications',name:'岗位资格与结果应用',ready:true,access:c=>canRead(c,'learning_apply')||canRead(c,'learning_config')},
+  ]},
   { id: 'people', name: '人事管理', icon: 'people', pages: [
     { id: 'organization', name: '人事组织架构', subtitle: '组织树与成员穿透', ready: true, access: c => canPeople(c)||canRead(c,'hr_configuration')||canRead(c,'ledger') },
     { id: 'people', name: '人事花名册', subtitle: '永久编号与任职历史', ready: true, access: canPeople },
@@ -103,6 +110,7 @@ export const navigation = [
   { id: 'reports', name: '数据报表', icon: 'chart', pages: [{ id:'reports/cost',name:'人力成本',ready:true,access:c=>canRead(c,'payroll_cost') }] },
   { id: 'personal', name: '我的办理', icon: 'home', bottom: true, pages: [
     { id: 'my/schedule', ready: true, name: '我的排班与考勤', subtitle: '本人安排、打卡与调班申请', access: c => !!c.has_person && canRead(c, 'attendance_self') },
+    {id:'my/learning',name:'我的学习与考试',ready:true,access:c=>!!c.has_person&&canRead(c,'learning_self')},
     {id:'my/performance',name:'我的绩效',ready:true,access:c=>!!c.has_person&&canRead(c,'perf_self')},
     { id:'my/payslips',name:'我的工资单',ready:true,access:c=>!!c.has_person&&canRead(c,'payroll_self') },
     { id: 'my/tasks', name: '我的待办', subtitle: '当前分配任务与办理', ready: true, access: canUsePortal },

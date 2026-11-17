@@ -1,6 +1,6 @@
 import React,{useEffect,useState} from 'react';
 import {Badge,Button,DataTable,EmptyState,ErrorState,Loading,Modal,Notice,PageHeading,Tabs} from '../components/UI.jsx';
-import {CommandFeedback} from '../components/platform/PlatformShared.jsx';
+import{PrivateCommandFeedback as CommandFeedback}from'../components/BusinessShared.jsx';
 import RosterTimeline from '../components/roster/Timeline.jsx';
 import TimeEditor from '../components/roster/TimeEditors.jsx';
 import {downloadEncoded,useTimeCommands,useTimeWorkspace} from '../components/roster/TimeShared.jsx';

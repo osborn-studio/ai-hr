@@ -43,12 +43,12 @@ try {
   const hq=companies.find(c=>c.company_kind==='headquarters');
   check('总部直属集团独立CN帐套不挂任何品牌',hq.name==='天意集团总部'&&hq.brand_id===null&&hq.ledger_id===ledgers.find(l=>l.scope_mode==='group').id&&hq.region_code==='CN'&&hq.currency_code==='CNY');
   eq('二十门店加一总部公司',[companies.filter(c=>c.company_kind==='store').length,companies.length],[20,21]);
-  check('每品牌十店且香港十店全部HK/HKD',companies.filter(c=>/^香香鱼米\d{2}店$/.test(c.name)&&c.region_code==='CN'&&c.currency_code==='CNY').length===10&&companies.filter(c=>/^大富烤肉\d{2}店$/.test(c.name)&&c.region_code==='HK'&&c.currency_code==='HKD').length===10);
+  check('每品牌十店且香港十店全部HK/HKD',companies.filter(c=>/^香香鱼米·.+店$/.test(c.name)&&c.region_code==='CN'&&c.currency_code==='CNY').length===10&&companies.filter(c=>/^大富烤肉·.+店$/.test(c.name)&&c.region_code==='HK'&&c.currency_code==='HKD').length===10);
   eq('标准岗位职级公司岗位独立建模',[await count('ty_job',gid),await count('ty_grade',gid),await count('ty_company_position',gid)],[3,3,61]);
   const areas=await q('SELECT w.* FROM ty_work_area w JOIN ty_company c ON c.id=w.company_id WHERE c.group_id=$1',[gid]);
   check('二十店均有两类档口且绑定内部部门',areas.length===40&&areas.filter(a=>a.mode==='department_extension').length===20&&areas.filter(a=>a.mode==='work_area_in_department').length===20&&areas.every(a=>a.department_id));
   const people=await q('SELECT * FROM ty_person WHERE group_id=$1 ORDER BY id',[gid]);
-  check('六十二人姓名与永久编号均独立虚构',people.length===62&&people.every(p=>/^虚构人员\d{2}$/.test(p.full_name)&&/^TY\d{6}$/.test(p.person_number))&&new Set(people.map(p=>p.person_number)).size===62);
+  check('六十二人使用独立中文姓名及永久编号',people.length===62&&people.every(p=>/^[\u4e00-\u9fff]{2,4}$/.test(p.full_name)&&/^TY\d{6}$/.test(p.person_number))&&new Set(people.map(p=>p.person_number)).size===62&&new Set(people.map(p=>p.full_name)).size===62);
   eq('保存六十三段雇佣和六十四段任职',[await count('ty_employment',gid),await count('ty_position_assignment',gid)],[63,64]);
   const stores=companies.filter(c=>c.company_kind==='store');
   const currentCounts=await q(`SELECT c.id,count(e.id)::int n FROM ty_company c LEFT JOIN ty_employment e ON e.company_id=c.id AND e.status='active' WHERE c.group_id=$1 AND c.company_kind='store' GROUP BY c.id`,[gid]);

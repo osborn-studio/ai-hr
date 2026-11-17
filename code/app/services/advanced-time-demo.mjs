@@ -13,14 +13,14 @@ const stamp=(date,h,m=0)=>new Date(Date.parse(date+'T00:00:00Z')+h*3600000+m*600
 const addMin=(s,n)=>new Date(Date.parse(s.replace(' ','T')+'Z')+n*60000).toISOString().replace('T',' ').slice(0,19);
 const shiftDefs=[['LUNCH','午市班','#1677FF','10:00–14:00'],['DINNER','晚市班','#7555D9','17:00–21:00'],['EARLY','早班','#14967D','09:00–13:00 / 14:00–18:00'],['LATE','晚班','#D98B16','13:00–17:00 / 18:00–22:00'],['NIGHT','跨夜班','#304698','18:00–22:00 / 22:30–次日02:30'],['OT','加班班段','#D83E69','经核定的额外班段'],['SWAP','调班','#007EAA','保留调前调后班段轨迹']];
 export async function seedOctober(t,{userId,input}){
- if(input?.confirm_synthetic!==true)throw bizErr('E_TY_ARGUMENT','必须明确confirm_synthetic，仅建立虚构记录');
+ if(input?.confirm_synthetic!==true)throw bizErr('E_TY_ARGUMENT','必须明确confirm_synthetic，仅建立记录');
  const a=await accessFor(t,userId);if(!a.platformAdmin)throw bizErr('E_TY_FORBIDDEN','演示月初始化须由全权限演示或技术初始化账号执行');
- const group=(await q(t,"SELECT * FROM ty_group WHERE code='TY-TEST' FOR UPDATE"))[0];if(!group)throw bizErr('E_TY_ARGUMENT','请先建立天意虚构工作区');
+ const group=(await q(t,"SELECT * FROM ty_group WHERE code='TY-TEST' FOR UPDATE"))[0];if(!group)throw bizErr('E_TY_ARGUMENT','请先建立天意工作区');
  const old=(await q(t,"SELECT * FROM ty_roster_period WHERE group_id=$1 AND period='2026-10-01'",[group.id]))[0];if(old){if(old.synthetic_version!==VERSION)throw bizErr('E_TY_CONFLICT','10月已有其他来源考勤，不覆盖');return receipt(t,old);}
- const period=(await q(t,"INSERT INTO ty_roster_period(group_id,period,label,synthetic_version,created_by)VALUES($1,'2026-10-01','2026年10月全虚构演示月',$2,$3)RETURNING *",[group.id,VERSION,userId]))[0];
+ const period=(await q(t,"INSERT INTO ty_roster_period(group_id,period,label,synthetic_version,created_by)VALUES($1,'2026-10-01','2026年10月考勤核算期',$2,$3)RETURNING *",[group.id,VERSION,userId]))[0];
  for(const [code,name,color,description] of shiftDefs)await t.query('INSERT INTO ty_shift_definition(group_id,code,name,color,description,updated_by)VALUES($1,$2,$3,$4,$5,$6)ON CONFLICT(group_id,code)DO NOTHING',[group.id,code,name,color,description,userId]);
  const people=await q(t,`SELECT DISTINCT ON(p.id) p.*,e.id employment_id,e.company_id home_company_id,e.employment_type,c.brand_id,c.name company_name,l.region_code,l.currency_code,a.department_id,a.work_area_id,a.grade_id,j.code job_code FROM ty_person p JOIN ty_employment e ON e.person_id=p.id JOIN ty_company c ON c.id=e.company_id CROSS JOIN LATERAL fn_ty_company_locale(c.id) l JOIN ty_position_assignment a ON a.employment_id=e.id AND a.is_primary JOIN ty_company_position pos ON pos.id=a.position_id JOIN ty_job j ON j.id=pos.job_id WHERE p.group_id=$1 AND e.hire_date<='2026-10-01' AND(e.leave_date IS NULL OR e.leave_date>='2026-10-31') AND e.status<>'cancelled' AND a.status<>'cancelled' AND a.valid_from<='2026-10-01' AND(a.valid_to IS NULL OR a.valid_to>'2026-10-31') ORDER BY p.id,e.hire_date DESC,a.valid_from DESC`,[group.id]);
- if(people.length!==62)throw bizErr('E_TY_CONFLICT','完整10月演示须有62名虚构在职人员，不推断缺失人员');
+ if(people.length!==62)throw bizErr('E_TY_CONFLICT','完整10月演示须有62名在职人员，不推断缺失人员');
  const stores=await q(t,"SELECT * FROM ty_company WHERE group_id=$1 AND company_kind='store' ORDER BY id",[group.id]);
  const departments=await q(t,'SELECT d.* FROM ty_department d JOIN ty_company c ON c.id=d.company_id WHERE c.group_id=$1 ORDER BY d.id',[group.id]);
  const areas=await q(t,'SELECT w.* FROM ty_work_area w JOIN ty_company c ON c.id=w.company_id WHERE c.group_id=$1 ORDER BY w.id',[group.id]);
@@ -72,7 +72,7 @@ export async function seedOctober(t,{userId,input}){
     if(event===1&&s.segment_no===1)actualIn=addMin(actualIn,15+ordinal%3*5);
     if(event===2&&s.segment_no===2)actualOut=addMin(actualOut,-20);
     await t.query("INSERT INTO ty_time_punch(segment_id,direction,punched_at,source,source_ref)VALUES($1,'in',$2,'synthetic',$3)",[s.id,actualIn,VERSION+':'+s.id+':in']);
-    if(event===3&&s.segment_no===2){await t.query("INSERT INTO ty_time_correction(segment_id,direction,corrected_at,reason,reviewed_by)VALUES($1,'out',$2,'虚构设备离线缺下班卡，主管核对值班记录补卡',$3)",[s.id,actualOut,userId]);}
+    if(event===3&&s.segment_no===2){await t.query("INSERT INTO ty_time_correction(segment_id,direction,corrected_at,reason,reviewed_by)VALUES($1,'out',$2,'设备离线缺下班卡，主管核对值班记录补卡',$3)",[s.id,actualOut,userId]);}
     else await t.query("INSERT INTO ty_time_punch(segment_id,direction,punched_at,source,source_ref)VALUES($1,'out',$2,'synthetic',$3)",[s.id,actualOut,VERSION+':'+s.id+':out']);
    }
   }
@@ -102,7 +102,7 @@ async function seedPayroll(t,{userId,group,period,summary,people}){
   {code:'cn_social_employer',name:'内地单位社保（合成比例）',kind:'employer_contribution',expression:'ROUND(social_basis*social_employer_rate,2)',jurisdiction_module:'CN_SOCIAL_INSURANCE'},
   {code:'cn_housing_employee',name:'公积金个人（合成参数）',kind:'employee_contribution',expression:'ROUND(social_basis*housing_rate,2)',jurisdiction_module:'CN_SOCIAL_INSURANCE'},
   {code:'cn_housing_employer',name:'公积金单位（合成参数）',kind:'employer_contribution',expression:'ROUND(social_basis*housing_rate,2)',jurisdiction_module:'CN_SOCIAL_INSURANCE'},
-  {code:'cn_tax',name:'个税（虚构累计法参数）',kind:'deduction',expression:'MAX(0,ROUND((taxable_ytd*tax_rate-quick_deduction)-tax_prepaid,2))',jurisdiction_module:'CN_IIT'}];
+  {code:'cn_tax',name:'个人所得税',kind:'deduction',expression:'MAX(0,ROUND((taxable_ytd*tax_rate-quick_deduction)-tax_prepaid,2))',jurisdiction_module:'CN_IIT'}];
  const hk=[
   {code:'mpf_employee',name:'香港个人MPF（资格显式）',kind:'employee_contribution',expression:'IF(employee_mpf_eligible,IF(mpf_relevant_income<employee_mpf_threshold,0,ROUND(MIN(mpf_relevant_income*mpf_rate,mpf_cap),2)),0)',jurisdiction_module:'HK_MPF'},
   {code:'mpf_employer',name:'香港雇主MPF（资格显式）',kind:'employer_contribution',expression:'IF(employer_mpf_eligible,ROUND(MIN(mpf_relevant_income*mpf_rate,mpf_cap),2),0)',jurisdiction_module:'HK_MPF'}];
@@ -123,8 +123,8 @@ async function seedPayroll(t,{userId,group,period,summary,people}){
    snapshot.push({...m,sick_minutes:detail.sick,other_paid_leave_minutes:detail.other_paid,festival_work_minutes:detail.festival,input_parameters:inputs});
   }
   const rules=[...base,...(region==='CN'?cn:hk)];
-  const ruleset=(await payroll.saveRuleSet(t,{userId,input:{group_id:group.id,name:`${region} 2026年10月考勤关联演示规则`,currency,region,rules,status:'approved',approval_ack:true,policy_notes:'全部为独立虚构演示。内地社保公积金基数比例及累计个税数据均为测试参数，非地区正式标准。香港月供MPF显式资格与相关入息；病假80%、日历按工作班段8小时计、加班CN1.5/HK1.25为可选合同演示，非默认法律结论。香港假期资格在合成样本中明确设定。内地国庆1–3日在岗额外2倍仅为试算。无真实付款。'}})).ruleset;
-  const batch=(await payroll.createBatch(t,{userId,input:{group_id:group.id,period:'2026-10',region_code:region,currency,kind:'calculated',label:`${region==='CN'?'内地':'香港'}10月考勤关联工资 · 全虚构未付款`,metadata:{adapter:VERSION,filename:`${VERSION}-${region}`},rows}})).batch;
+  const ruleset=(await payroll.saveRuleSet(t,{userId,input:{group_id:group.id,name:`${region} 2026年10月考勤计薪规则`,currency,region,rules,status:'approved',approval_ack:true,policy_notes:'演示参数方案。内地社保公积金基数比例及累计个税数据均为测试参数，非地区正式标准。香港月供MPF显式资格与相关入息；病假80%、日历按工作班段8小时计、加班CN1.5/HK1.25为可选合同演示，非默认法律结论。香港假期资格在合成样本中明确设定。内地国庆1–3日在岗额外2倍仅为试算。无真实付款。'}})).ruleset;
+  const batch=(await payroll.createBatch(t,{userId,input:{group_id:group.id,period:'2026-10',region_code:region,currency,kind:'calculated',label:`${region==='CN'?'内地':'香港'}10月考勤关联工资 · 待付款`,metadata:{adapter:VERSION,filename:`${VERSION}-${region}`},rows}})).batch;
   const applied=await payroll.applyPerformanceCandidates(t,{userId,batchId:batch.id,input:{cycle_id:perf.selected_id,rounding:'round_2'}});if(applied.applied.length!==rows.length||applied.blocked.length)throw new Error('October performance posting incomplete');
   const result=await payroll.calculateBatch(t,{userId,batchId:batch.id,input:{ruleset_id:ruleset.id}});if(!result.ok)throw new Error('Synthetic October payroll calculation failed: '+JSON.stringify(result.checks?.filter(r=>!r.ok)));
   const validation=await payroll.validateBatch(t,{userId,batchId:batch.id});if(!validation.ok)throw new Error('Synthetic October payroll validation failed');
@@ -135,12 +135,12 @@ async function seedPayroll(t,{userId,group,period,summary,people}){
 async function receipt(t,period){return{synthetic:true,version:VERSION,period_id:period.id,period:'2026-10',people:Number((await q(t,'SELECT count(DISTINCT person_id) n FROM ty_roster_day WHERE period_id=$1',[period.id]))[0].n),person_days:Number((await q(t,'SELECT count(*) n FROM ty_roster_day WHERE period_id=$1',[period.id]))[0].n),segments:Number((await q(t,'SELECT count(*) n FROM v_ty_time_segment WHERE period_id=$1',[period.id]))[0].n),payroll_batches:(await q(t,'SELECT batch_id,region_code FROM ty_time_payroll_link WHERE period_id=$1 ORDER BY region_code',[period.id])),payments_executed:0};}
 async function seedPerformance(t,{userId,group,period,people,region,currency}){
  const companyIds=[...new Set(people.map(p=>p.home_company_id))],grades=await q(t,'SELECT * FROM ty_grade WHERE group_id=$1 ORDER BY level,id',[group.id]);
- const baseRules={confirmed:true,payout_assignment:'last_month_employment',alternative_eligibility:'last_month',alternative_rounding:'round_2',score_base:1,score_floor:0,metrics:[{code:'quality',unit:'ratio',method:'direct_deduction'},{code:'turnover',unit:'ratio',method:'direct_deduction'}],rating_bands:[{min_score:.995,grade:'S',factor:2},{min_score:.945,grade:'A',factor:1.5},{min_score:.845,grade:'B',factor:1.2},{min_score:.505,grade:'C',factor:1},{min_score:0,grade:'D',factor:0}],grade_bases:Object.fromEntries(grades.map((g,i)=>[g.id,1000+i*600])),management:{confirmed:true,method:'weighted_company_scores'},score_tolerance:.000001,amount_tolerance:.01,policy_notes:'全虚构10月门店服务质量和人员稳定指标，个人按当月有效职级及资格核定；两种奖金策略保留，演示选择逐月金额取整，无客户真实数据。'};
+ const baseRules={confirmed:true,payout_assignment:'last_month_employment',alternative_eligibility:'last_month',alternative_rounding:'round_2',score_base:1,score_floor:0,metrics:[{code:'quality',unit:'ratio',method:'direct_deduction'},{code:'turnover',unit:'ratio',method:'direct_deduction'}],rating_bands:[{min_score:.995,grade:'S',factor:2},{min_score:.945,grade:'A',factor:1.5},{min_score:.845,grade:'B',factor:1.2},{min_score:.505,grade:'C',factor:1},{min_score:0,grade:'D',factor:0}],grade_bases:Object.fromEntries(grades.map((g,i)=>[g.id,1000+i*600])),management:{confirmed:true,method:'weighted_company_scores'},score_tolerance:.000001,amount_tolerance:.01,policy_notes:'10月门店服务质量和人员稳定指标，个人按当月有效职级及资格核定；两种奖金策略保留，演示选择逐月金额取整，无客户真实数据。'};
  const companyMetrics=companyIds.map((id,i)=>({company_id:id,period:'2026-10',metrics:{quality:{value:.013+(i%3)*.01,unit:'ratio',status:'verified',source_ref:{kind:'synthetic',version:VERSION}},turnover:{value:.007+(i%4)*.005,unit:'ratio',status:'verified',source_ref:{kind:'synthetic',version:VERSION}}},source_ref:{kind:'synthetic',time_period_id:period.id,version:VERSION}}));
  const months=people.map(p=>({person_id:p.id,company_id:p.home_company_id,employment_id:p.employment_id,grade_id:p.grade_id,period:'2026-10',score_source:'company',eligibility_status:'verified',eligibility_weight:1,source_ref:{kind:'synthetic',time_period_id:period.id,version:VERSION}}));
  const cycles=[];
  for(const [i,aggregation] of ['floor_average_months','average_score_last_grade'].entries()){
-  const cycle=(await performance.createCycle(t,{userId,input:{group_id:group.id,code:`SYN-${region}-202610-${i?'AVERAGE':'MONTHLY'}`,name:`${region==='CN'?'内地':'香港'}10月虚构绩效 · ${i?'平均分与期末职级':'逐月奖金取整'}`,start_date:'2026-10',end_date:'2026-11',payout_period:'2026-10',region_code:region,currency_code:currency,company_ids:companyIds}})).cycle;
+  const cycle=(await performance.createCycle(t,{userId,input:{group_id:group.id,code:`SYN-${region}-202610-${i?'AVERAGE':'MONTHLY'}`,name:`${region==='CN'?'内地':'香港'}10月绩效 · ${i?'平均分与期末职级':'逐月奖金取整'}`,start_date:'2026-10',end_date:'2026-11',payout_period:'2026-10',region_code:region,currency_code:currency,company_ids:companyIds}})).cycle;
   await performance.saveScheme(t,{userId,cycleId:cycle.id,input:{rules:{...baseRules,aggregation},source_refs:[{kind:'synthetic',version:VERSION,time_period_id:period.id}],confirmation_note:'测试帐套自行选用，无外部业务确认依赖'}});
   await performance.saveInputs(t,{userId,cycleId:cycle.id,input:{company_metrics:companyMetrics,person_months:months,responsibilities:[]}});
   let result=await performance.calculate(t,{userId,cycleId:cycle.id});if(!result.scope.can_confirm)throw new Error('October performance blocked: '+JSON.stringify(result.summary));
