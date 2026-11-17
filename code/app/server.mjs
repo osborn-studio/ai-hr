@@ -2745,7 +2745,9 @@ export async function createApp({ apiExtension = null, skipDemoSeed = false } = 
               if(r.can_read&&r.can_write)break;
             }if(r.can_read&&r.can_write)break;}}
           }
-          const person=(await tx.query('SELECT person_id FROM sys_account WHERE id=$1',[uid])).rows[0]?.person_id;
+          // The current native binding is authoritative. A newly onboarded person
+          // need not acquire an unrelated legacy record to open self-service.
+          const person=profile?!!(profile.person_id&&profile.group_id&&(await tx.query('SELECT EXISTS(SELECT 1 FROM ty_person WHERE id=$1 AND group_id=$2)ok',[profile.person_id,profile.group_id])).rows[0].ok):!!(await tx.query('SELECT EXISTS(SELECT 1 FROM sys_account a JOIN person p ON p.id=a.person_id WHERE a.id=$1 AND a.status=\'active\')ok',[uid])).rows[0].ok;
           return {resources:Object.fromEntries(rows.map(r=>[r.resource_code,{can_read:r.can_read,can_write:r.can_write}])),
             profile_code:profile?.profile_code||null,has_person:!!person,has_outsource:profile?.profile_code==='outsourced_staff'||(profile?.person_id&&(await tx.query("SELECT to_regclass('public.ty_outsource_engagement')IS NOT NULL ok")).rows[0].ok?!!(await tx.query('SELECT EXISTS(SELECT 1 FROM ty_outsource_engagement WHERE person_id=$1)ok',[profile.person_id])).rows[0].ok:false)};
         });

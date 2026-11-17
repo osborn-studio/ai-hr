@@ -1,5 +1,6 @@
 import { createDomainPort } from './domain-port.mjs';
 import{handleIntegrationCallback}from'./cloud-integration-callback.mjs';
+import{handleSsoPublic}from'./cloud-sso.mjs';
 import{operations as INTEGRATION_OPERATIONS}from'./services/integration-runtime.mjs';
 import * as foundation from './services/foundation.mjs';
 import * as payroll from './services/customer-payroll.mjs';
@@ -96,6 +97,8 @@ export function domainOperations() {
     ...Object.fromEntries(Object.entries({"files.format.create": "createFinanceFormat", "files.registration.create": "createFinanceRegistration", "files.identity.create": "createFilingIdentity", "files.approve": "approveFinanceFileConfig", "configured.export": "createConfiguredExport"}).map(([name,method])=>['payroll.native.finance.'+name,command(finance('payroll-finance-formats',method))])),
     'payroll.script.workspace':query(payrollScript('queryWorkspace')),
     ...Object.fromEntries(['save','approve','disable','preview','proposal.create','trigger.save','trigger.approve','trigger.disable','trigger.enqueue','job.process','ai.propose'].map(name=>['payroll.script.'+name,command(payrollScript('dispatchCommand',name))])),
+    'integration.sso.workspace':query(async(tx,input,c)=>{if(!(await tx.query("SELECT to_regclass('public.ty_sso_profile')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 企业平台登录尚未就绪');return(await import('./services/external-sso.mjs')).ssoWorkspace(tx,{userId:c.userId,input});}),
+    ...Object.fromEntries(Object.entries({'profile.save':'saveSsoProfile','profile.approve':'approveSsoProfile','binding.save':'saveSsoBinding','binding.approve':'approveSsoBinding','configuration.disable':'disableSsoConfiguration'}).map(([name,method])=>['integration.sso.'+name,command(async(tx,input,c)=>{if(!(await tx.query("SELECT to_regclass('public.ty_sso_profile')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 企业平台登录尚未就绪');return(await import('./services/external-sso.mjs'))[method](tx,{userId:c.userId,input,operationId:c.operationId});})])),
     'hr.legal.workspace':query(hr('hr-legal-subject','queryWorkspace')),
     ...Object.fromEntries(['propose','decide','apply','cancel'].map(name=>['hr.legal.'+name,command(hr('hr-legal-subject','dispatchCommand',name))])),
     'hr.workspace':query(hr('hr','queryWorkspace')),
@@ -134,7 +137,8 @@ export function domainOperations() {
     'system.workflow.preview':query(system('previewWorkflow')),
     'system.authorization.simulate':query(system('simulateAuthorization')),
     'system.operation.status':query(system('operationStatus')),
-    'time.workspace':query(async(tx,i,c)=>(await import('./services/advanced-time-v2.mjs')).queryWorkspace(tx,{userId:c.userId,input:i})),
+    'time.workspace':query(async(tx,i,c)=>{const installed=(await tx.query("SELECT to_regclass('public.ty_tw_execution')IS NOT NULL ok")).rows[0].ok;return(await import(installed?'./services/time-workflow.mjs':'./services/advanced-time-v2.mjs')).queryWorkspace(tx,{userId:c.userId,input:i});}),
+    'time.workflow.submit':command(async(tx,input,c)=>{if(!(await tx.query("SELECT to_regclass('public.ty_tw_execution')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 排班考勤审批尚未就绪');return(await import('./services/time-workflow.mjs')).submitTimeWorkflow(tx,{userId:c.userId,input,operationId:c.operationId});}),
     'time.export':query(async(tx,i,c)=>(await import('./services/advanced-time-v2.mjs')).exportReport(tx,{userId:c.userId,input:i})),
     ...Object.fromEntries(TIME_ACTIONS.map(name=>['time.'+name,command(async(tx,i,c)=>(await import('./services/advanced-time-v2.mjs')).dispatchCommand(tx,{userId:c.userId,input:i,operationId:c.operationId,operation:name}))])),
     ...Object.fromEntries(['operator.create','operator.update','operator.reset_password','role.save','role.assign','role.revoke_member','grant.save','grant.revoke','form.save','form.publish','workflow.save','workflow.publish','instance.submit','instance.decide','instance.transfer','instance.delegate','instance.execute','instance.cancel','integration.save','integration.secret','integration.validate','integration.snapshot','integration.mapping'].map(name=>['system.'+name,command(system(name,true))])),
@@ -144,7 +148,8 @@ export function domainOperations() {
     ])),
     'leave.lifecycle.workspace':query(lifecycle('workspace')),
     ...Object.fromEntries(Object.entries({'extension':'proposeExtension','carry':'proposeCarry','recurring':'proposeRecurring','advance':'proposeAdvance','overtime-basis':'proposeOvertimeBasis','overtime-allocation':'proposeOvertimeAllocation','comp-cash':'proposeCompCash','advance-repayment':'proposeAdvanceRepayment','cash-qualification':'proposeCashQualification','annual-cash':'proposeAnnualCash','decide':'approveProposal','cancel':'cancelProposal','occurrences':'buildOccurrences','occurrence-submit':'submitOccurrence','exit-advances':'reviewExitAdvances'}).map(([name,method])=>['leave.lifecycle.'+name,command(lifecycle(method))])),
-    'leave.workspace': query(leave('queryWorkspace')),
+    'leave.workspace':query(async(tx,input,c)=>{if(!(await tx.query("SELECT to_regclass('public.ty_tw_execution')IS NOT NULL ok")).rows[0].ok)return leave('queryWorkspace')(tx,input,c);return(await import('./services/leave-workflow-entry.mjs')).queryLeaveWorkspace(tx,{...input,userId:c.userId,accountId:input.account_id??input.accountId,groupId:input.group_id??input.groupId,companyId:input.company_id??input.companyId,ledgerId:input.ledger_id??input.ledgerId});}),
+    'leave.workflow.submit':command(async(tx,input,c)=>{if(!(await tx.query("SELECT to_regclass('public.ty_tw_execution')IS NOT NULL ok")).rows[0].ok)throw new Error('E_OPERATION_NOT_AVAILABLE: 原请假单送审尚未就绪');return(await import('./services/leave-workflow-entry.mjs')).submitExistingLeave(tx,{userId:c.userId,input,operationId:c.operationId});}),
     'leave.balance': query(leave('balance')),
     'leave.adjustment.preview': command(leave('previewAdjustment')),
     'leave.scheme.create': command(leave('createScheme')),
@@ -188,6 +193,6 @@ export function createCloudApiExtension() {
       fn: tx => port.executeCommand(name, input, context, { tx, operationId: req.headers['idempotency-key'] || input?.client_operation_id }) });
     return true;
   };
-  extend.public=handleIntegrationCallback;
+  extend.public=async args=>await handleSsoPublic(args)||handleIntegrationCallback(args);
   return extend;
 }

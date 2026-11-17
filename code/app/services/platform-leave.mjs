@@ -10,7 +10,7 @@ export async function leaveRequestSource(t,requestId){
 }
 export async function submitLeaveSubject(t,{userId,input,values,form,operationId}){
  if(input.subject_id||values.request_id){
-  const source=await leaveRequestSource(t,input.subject_id||values.request_id);if(!same(source.group_id,form.group_id)||!same(source.request.created_by,userId))deny('只能将本人经办的原请假单转入审批');if(source.request.status!=='pending')conflict('原请假单已处理');
+  const source=await leaveRequestSource(t,input.subject_id||values.request_id);if(!same(source.group_id,form.group_id)||!await sameHuman(t,source.request.created_by,userId))deny('只能将本人经办的原请假单转入审批');if(source.request.status!=='pending')conflict('原请假单已处理');
   await accountContext(t,{userId,accountId:source.request.account_id,resource:'advanced_leave_manage',write:true,selfAllowed:true,action:'submit',fields:['quantity','facts']});
   await ensureFormBinding(t,userId,form,input,source);
   const r=source.request;return{type:'leave_request',id:r.id,hash:source.source_hash,person_id:source.person_id,company_id:source.company_id,authoritative_quantity:String(r.quantity),authoritative_values:{request_id:String(r.id),account_id:String(r.account_id),employment_id:String(r.employment_id),scheme_id:String(r.scheme_id),quantity:String(r.quantity),starts_at:new Date(r.starts_at).toISOString(),ends_at:new Date(r.ends_at).toISOString()}};
@@ -28,8 +28,12 @@ export async function executeApprovedLeave(t,{userId,id:requestId,approvalReceip
  await requireAccess(t,userId,'advanced_leave_approve','execute',{group_id:first.group_id,company_id:first.company_id,person_id:first.person_id,fields:['status','approved_by']});
  const request=await one(t,'SELECT * FROM ty_leave_request WHERE id=$1 FOR UPDATE',[first.request.id]);
  const source=await leaveRequestSource(t,request.id);
- const{verifyApprovalReceipt}=await import('./platform-workflow.mjs');const receipt=await verifyApprovalReceipt(t,{userId,instanceId:approvalReceiptId,subjectType:'leave_request',subjectId:String(request.id),sourceHash:source.source_hash});
- if(!same(receipt.original_requester_id,request.created_by)||await sameHuman(t,receipt.approved_by,request.created_by)||await humanIsPerson(t,receipt.approved_by,source.group_id,source.person_id)||!same(receipt.execution_actor_id,userId))deny('请假审批的申请人、批准人或实际执行人不符');
+ const{verifyApprovalReceipt}=await import('./platform-workflow.mjs');const frozenApproval=await one(t,'SELECT source_hash FROM ty_workflow_instance WHERE id=$1',[approvalReceiptId]);if(!frozenApproval)bad('请假审批实例不存在');const receipt=await verifyApprovalReceipt(t,{userId,instanceId:approvalReceiptId,subjectType:'leave_request',subjectId:String(request.id),sourceHash:frozenApproval.source_hash});
+ await accountContext(t,{userId:receipt.approved_by,accountId:first.request.account_id,resource:'advanced_leave_approve',write:true,action:'approve',fields:['status','quantity','facts']});
+ if(!['pending','approved'].includes(request.status))conflict('请假来源已变化，审批不能覆盖已取消或已处理的记录');
+ if(source.source_hash!==frozenApproval.source_hash){await t.query("UPDATE ty_workflow_instance SET status='blocked',business_state='blocked',revision=revision+1 WHERE id=$1",[receipt.instance_id]);return{blocked:true,source_changed:true};}
+
+ if(!await sameHuman(t,receipt.original_requester_id,request.created_by)||await sameHuman(t,receipt.approved_by,request.created_by)||await humanIsPerson(t,receipt.approved_by,source.group_id,source.person_id)||!same(receipt.execution_actor_id,userId))deny('请假审批的申请人、批准人或实际执行人不符');
  if(request.status==='approved'){
   const existing=await one(t,"SELECT 1 FROM ty_workflow_instance WHERE id=$1 AND business_state='applied'",[receipt.instance_id]);if(!existing||!same(request.approved_by,receipt.approved_by))conflict('请假已由其他路径处理');return{request,replayed:true};
  }
@@ -46,7 +50,7 @@ export async function rejectLeaveSubject(t,{userId,instance}){
  await accountContext(t,{userId,accountId:first.request.account_id,resource:'advanced_leave_approve',write:true,action:'approve',fields:['status','approved_by']});
  const current=await one(t,'SELECT * FROM ty_leave_request WHERE id=$1 FOR UPDATE',[first.request.id]);const source=await leaveRequestSource(t,current.id);
  const task=await one(t,"SELECT 1 FROM ty_workflow_task WHERE instance_id=$1 AND approver_id=$2 AND status='rejected'",[instance.id,userId]);
- if(!task||await sameHuman(t,userId,current.created_by)||await humanIsPerson(t,userId,source.group_id,source.person_id)||!same(instance.applicant_id,current.created_by))deny('拒绝审批没有有效的真实任务来源');
+ if(!task||await sameHuman(t,userId,current.created_by)||await humanIsPerson(t,userId,source.group_id,source.person_id)||!await sameHuman(t,instance.applicant_id,current.created_by))deny('拒绝审批没有有效的真实任务来源');
  const {emit}=await import('./platform-core.mjs');
  if(source.source_hash!==instance.source_hash||current.status!=='pending'){
   await t.query("UPDATE ty_workflow_instance SET business_state='blocked',block_reason='请假来源已变化，拒绝后额度释放待核',revision=revision+1 WHERE id=$1",[instance.id]);

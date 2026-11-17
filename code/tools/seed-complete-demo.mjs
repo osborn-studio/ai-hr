@@ -4,6 +4,7 @@ import{randomUUID}from'node:crypto';import{resolve}from'node:path';import{pathTo
 import{createDb,withTx}from'../app/db.mjs';import{createApp}from'../app/server.mjs';
 import{seed as seedWorkspace}from'../app/services/test-workspace.mjs';import{seed as seedAccounts}from'../app/services/test-accounts.mjs';import{upgradeDemo}from'../app/services/organization.mjs';import{seedOctober}from'../app/services/advanced-time-demo.mjs';import{seed as seedOutsourcing}from'../app/services/outsourcing-demo.mjs';
 import{seedPersonalPortalDemo}from'./seed-personal-portal-demo.mjs';import{seedIntegrationDemo}from'./seed-integration-runtime-demo.mjs';
+import{seedTimeWorkflowDemo}from'./seed-time-workflow-demo.mjs';import{seedWorkflowNotificationDemo}from'./seed-workflow-notification-demo.mjs';
 import{seedWorkforceNativeDemo}from'./seed-workforce-native-demo.mjs';import{seedPayrollFinanceDemo}from'./seed-payroll-finance-demo.mjs';import{seedPayrollScriptDemo}from'./seed-payroll-script-demo.mjs';
 import{seedAdvancedLeaveDemo}from'./seed-advanced-leave-demo.mjs';import{seedPeopleServicesDemo}from'./seed-people-services-demo.mjs';import{seedTimeV2Demo}from'./seed-time-v2-demo.mjs';import{seedNativeHrDemo}from'./seed-native-hr-demo.mjs';import{seedStandardPayrollDemo}from'./seed-standard-payroll-demo.mjs';import{seedPerformanceDemo}from'./seed-performance-native-demo.mjs';import{seedLearningDemo}from'./seed-learning-native-demo.mjs';
 
@@ -43,9 +44,11 @@ export async function createCompleteDemo({confirmSynthetic=false,outputDirectory
   const workforce=await phase('native_workforce',()=>seedWorkforceNativeDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'workforce-scenes.json',workforce);
   const finance=await phase('native_payroll_finance',()=>seedPayrollFinanceDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'payroll-finance-scenes.json',finance);
   const scripts=await phase('native_payroll_scripts',()=>seedPayrollScriptDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'payroll-script-scenes.json',scripts);
+  const timeWorkflow=await phase('time_workflow',()=>seedTimeWorkflowDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'time-workflow-scenes.json',timeWorkflow);
+  const notifications=await phase('workflow_notifications',()=>seedWorkflowNotificationDemo(db,{confirmSynthetic:true}));await privateJson(outputDirectory,'workflow-notification-scenes.json',notifications);
   const facts=(await db.query("SELECT json_build_object('people',(SELECT count(*)FROM ty_person),'accounts',(SELECT count(*)FROM ty_test_account_profile),'stores',(SELECT count(*)FROM ty_company WHERE org_level='store'),'migrations',(SELECT count(*)FROM schema_migration))facts")).rows[0].facts;
   if(facts.people!==62||facts.accounts!==77||facts.stores!==20)fail('完整演示身份或门店数量不符合场景设计，未标完成');
-  const result={version:'TY-NATURAL-RESTAURANT-V3',synthetic_only:true,demonstration_label:'演示帐套',complete:true,...facts,external_calls:0,real_bank_payments:0,passwords_in_artifacts:false};await privateJson(outputDirectory,'complete-demo-manifest.json',result);return result;
+  const result={version:'TY-NATURAL-RESTAURANT-V4',synthetic_only:true,demonstration_label:'演示帐套',complete:true,...facts,external_calls:0,real_bank_payments:0,passwords_in_artifacts:false};await privateJson(outputDirectory,'complete-demo-manifest.json',result);return result;
  }finally{await db.close();}
 }
 

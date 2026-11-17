@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:portal-native && npm run test:learning-native && npm run test:standard-payroll && npm run test:integration-runtime && npm run test:demo-identity && npm run test:frontend && npm run test:workforce-native && npm run test:payroll-finance && npm run test:payroll-scripts",
+    "test": "npm run test:legacy && npm run test:new && npm run test:cloud && npm run test:leave && npm run test:leave-lifecycle && npm run test:platform && npm run test:people-services && npm run test:time-native && npm run test:hr-native && npm run test:payroll-native && npm run test:performance-native && npm run test:portal-native && npm run test:learning-native && npm run test:standard-payroll && npm run test:integration-runtime && npm run test:demo-identity && npm run test:frontend && npm run test:workforce-native && npm run test:payroll-finance && npm run test:payroll-scripts && npm run test:time-workflow && npm run test:external-sso && npm run test:notifications",
     "test:db": "node test/run.mjs",
     "test:api": "node test/api.test.mjs",
     "test:scope": "node test/station-scope.mjs",
@@ -80,7 +80,10 @@
     "test:integration-runtime": "node test/integration-runtime.test.mjs && node --test test/integration-providers.test.mjs test/integration-directory.test.mjs",
     "test:workforce-native": "node test/workforce-native.test.mjs",
     "test:payroll-finance": "node test/payroll-payments.test.mjs && node test/payroll-industry-integration.test.mjs && node --test test/payroll-contribution-rounding.test.mjs test/payroll-industry-calculations.test.mjs",
-    "test:payroll-scripts": "node test/payroll-scripts.test.mjs && node --test test/payroll-script-engine.test.mjs"
+    "test:payroll-scripts": "node test/payroll-scripts.test.mjs && node --test test/payroll-script-engine.test.mjs",
+    "test:time-workflow": "node test/time-workflow.test.mjs",
+    "test:external-sso": "node test/external-sso.test.mjs",
+    "test:notifications": "node test/workflow-notifications.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",
