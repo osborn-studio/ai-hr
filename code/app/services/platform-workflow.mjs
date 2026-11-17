@@ -1,6 +1,7 @@
 import{subjectDepartment,snapshotScopeAvailable}from'./workflow-scope.mjs';
 import{grantAllowsField}from'./platform-core.mjs';
 import{sameHuman,humanIsPerson}from'./human-identity.mjs';
+import{retainNotificationCopies,notifyWorkflowResult}from'./workflow-notifications.mjs';
 import{q,one,same,bad,deny,conflict,missing,id,text,obj,revision,groupFor,rowScope,requireAccess,authorization,command,audit,emit,hash,currentOperator,visibleOperators}from'./platform-core.mjs';
 import{validateGraph,validateSchema,validateValues,nextNode,projectValues}from'../platform-model.mjs';
 
@@ -10,6 +11,7 @@ const RESOURCE='workflow_manage';
 // Each business adapter reopens its own source and current complete grants.
 // Generic workflow values never substitute for payroll/personnel authority.
 async function businessAdapter(t,type){
+ if(['time_change','time_punch_correction'].includes(type)){if(!(await one(t,"SELECT to_regclass('public.ty_tw_execution')IS NOT NULL ok")).ok)bad('排班考勤审批尚未安装');const a=await import('./platform-time.mjs');return{submit:a.submitTimeSubject,approve:a.assertTimeApproval,project:a.projectTimeInstance,execute:a.executeTimeSubject,reject:a.rejectTimeSubject,cancel:a.cancelTimeSubject};}
  if(type==='payroll_finance'){
   if(!(await one(t,"SELECT to_regclass('public.ty_pay_finance_subject')IS NOT NULL ok")).ok)bad('薪酬资金审批尚未安装');
   const a=await import('./platform-payroll-finance.mjs');return{submit:a.submitFinanceSubject,approve:a.assertFinanceApproval,project:a.projectFinanceInstance,execute:a.executeFinanceSubject,reject:a.rejectFinanceSubject,cancel:a.cancelFinanceSubject};
@@ -87,13 +89,12 @@ async function advance(t,instance,from,userId){
    await t.query("UPDATE ty_workflow_instance SET status='running',current_node=$2,block_reason=NULL,revision=revision+1 WHERE id=$1",[instance.id,n.id]);await log(t,instance,userId,'task.created',n.id,{approver_ids:approvers});return;
   }
   if(n.type==='notify'){
-   const recipients=await resolveApprovers(t,instance,n);
-   for(const actor of recipients)await t.query('INSERT INTO ty_workflow_copy(instance_id,account_id,node_id)VALUES($1,$2,$3)ON CONFLICT DO NOTHING',[instance.id,actor,n.id]);
+   const recipients=await retainNotificationCopies(t,{instance,node:n,projectInstance});
    await emit(t,instance.group_id,`workflow:${instance.id}:notify:${n.id}`,'workflow.copy',{instance_id:instance.id,recipient_ids:recipients});
   }
   if(n.type==='end'){
    await t.query("UPDATE ty_workflow_instance SET status='approved',current_node=$2,finished_at=now(),revision=revision+1 WHERE id=$1",[instance.id,n.id]);
-   await log(t,instance,userId,'approved',n.id);await emit(t,instance.group_id,`workflow:${instance.id}:approved`,'workflow.approved',{instance_id:instance.id,subject_type:instance.subject_type,subject_id:instance.subject_id});return;
+   await notifyWorkflowResult(t,{instance,outcome:'approved',projectInstance});await log(t,instance,userId,'approved',n.id);await emit(t,instance.group_id,`workflow:${instance.id}:approved`,'workflow.approved',{instance_id:instance.id,subject_type:instance.subject_type,subject_id:instance.subject_id});return;
   }
   try{next=nextNode(n,instance.form_values);}catch(e){bad(e.message);}
  }bad('流程超过最大节点数');
@@ -202,7 +203,7 @@ export async function decideInstance(t,{userId,input,operationId}){
    if(inst.subject_type==='leave_request')await(await import('./platform-leave.mjs')).rejectLeaveSubject(t,{userId,instance:inst});
    else if(inst.subject_type==='leave_lifecycle_proposal')await(await import('./leave-lifecycle.mjs')).rejectWorkflowProposal(t,{userId,id:inst.subject_id,instanceId:inst.id});
    else{const a=await businessAdapter(t,inst.subject_type);if(a)await a.reject(t,{userId,instance:inst});}
-   await emit(t,inst.group_id,`workflow:${inst.id}:rejected`,'workflow.rejected',{instance_id:inst.id});}
+   await notifyWorkflowResult(t,{instance:inst,outcome:'rejected',projectInstance});await emit(t,inst.group_id,`workflow:${inst.id}:rejected`,'workflow.rejected',{instance_id:inst.id});}
   else{
    await t.query('UPDATE ty_workflow_instance SET last_approver_id=$2,revision=revision+1 WHERE id=$1',[inst.id,userId]);
    const pending=await one(t,"SELECT count(*) n FROM ty_workflow_task WHERE instance_id=$1 AND node_id=$2 AND status='pending'",[inst.id,task.node_id]);
@@ -242,6 +243,6 @@ export async function cancelInstance(t,{userId,input,operationId}){
   }else if(current.subject_type==='leave_lifecycle_proposal')await(await import('./leave-lifecycle.mjs')).cancelProposal(t,{userId,id:current.subject_id,reason});
   else{const a=await businessAdapter(t,current.subject_type);if(a)await a.cancel(t,{userId,instance:current,reason});}
   await t.query("UPDATE ty_workflow_task SET status='cancelled',revision=revision+1 WHERE instance_id=$1 AND status='pending'",[current.id]);
-  await t.query("UPDATE ty_workflow_instance SET status='cancelled',business_state='not_applicable',finished_at=now(),revision=revision+1 WHERE id=$1",[current.id]);await log(t,current,userId,'cancelled',current.current_node,{reason});await emit(t,current.group_id,`workflow:${current.id}:cancelled`,'workflow.cancelled',{instance_id:current.id});return{instance:await projectInstance(t,userId,current.id)};
+  await t.query("UPDATE ty_workflow_instance SET status='cancelled',business_state='not_applicable',finished_at=now(),revision=revision+1 WHERE id=$1",[current.id]);await notifyWorkflowResult(t,{instance:current,outcome:'cancelled',projectInstance});await log(t,current,userId,'cancelled',current.current_node,{reason});await emit(t,current.group_id,`workflow:${current.id}:cancelled`,'workflow.cancelled',{instance_id:current.id});return{instance:await projectInstance(t,userId,current.id)};
  }});
 }

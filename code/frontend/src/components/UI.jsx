@@ -41,10 +41,12 @@ export function Modal({ title, children, onClose, wide = false }) {
   return <dialog ref={ref} aria-labelledby={id} className={`modal ${wide ? 'wide' : ''}`}><div className="modal-heading"><h2 id={id}>{title}</h2><button className="icon-button" aria-label="关闭对话框" onClick={onClose}><Icon name="close"/></button></div><div className="modal-body">{children}</div></dialog>;
 }
 export function useRemote(loader, key) {
-  const [state, setState] = useState({ loading: true, data: null, error: null }); const [revision, reload] = useState(0);
-  useEffect(() => { const controller = new AbortController(); let current = true; setState({ loading: true, data: null, error: null });
-    Promise.resolve().then(() => loader(controller.signal)).then(data => { if (current) setState({ loading: false, data, error: null }); }).catch(error => { if (current && error.name !== 'AbortError') setState({ loading: false, data: null, error }); });
+  const [state, setState] = useState({ key, loading: true, data: null, error: null }); const [revision, reload] = useState(0);
+  useEffect(() => { const controller = new AbortController(); let current = true; setState({ key, loading: true, data: null, error: null });
+    Promise.resolve().then(() => loader(controller.signal)).then(data => { if (current) setState({ key, loading: false, data, error: null }); }).catch(error => { if (current && error.name !== 'AbortError') setState({ key, loading: false, data: null, error }); });
     return () => { current = false; controller.abort(); };
   }, [key, revision]);
-  return { ...state, reload: () => reload(v => v + 1) };
+  // A changed column layout/scope must never paint rows from the previous key,
+  // including the render before its loading effect has run.
+  return { ...(state.key===key?state:{loading:true,data:null,error:null}), reload: () => reload(v => v + 1) };
 }

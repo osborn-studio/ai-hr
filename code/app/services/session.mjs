@@ -44,6 +44,7 @@ export async function check(db, token) {
   if (!token) return { status: 'missing' };
   const r = (await db.query('SELECT * FROM fn_session_check($1)', [hashToken(token)])).rows[0];
   if (!r) return { status: 'missing' };
+  if(r.status==='ok'&&!await(await import('./external-sso.mjs')).ssoSessionCurrent(db,token))return{status:'revoked',userId:r.user_id===null?null:Number(r.user_id),revokedReason:'企业平台登录配置或当前权限已失效',mustChange:!!r.must_change};
   return {
     status: r.status,
     userId: r.user_id === null ? null : Number(r.user_id),

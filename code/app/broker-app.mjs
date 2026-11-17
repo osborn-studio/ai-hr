@@ -56,6 +56,7 @@ export async function createBrokerApp(config, { broker: suppliedBroker } = {}) {
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
+      if(url.pathname.startsWith('/auth/sso/'))return url.pathname==='/auth/sso/entrypoints'&&req.method==='GET'?json(res,200,{entries:[]}):json(res,503,{error:'E_SSO_BACKEND_REQUIRED',message:'企业平台登录需由Broker服务端提供身份验证和事务处理器'});
       if(/^\/api\/integrations\/callback\//.test(url.pathname))return json(res,503,{error:'E_CALLBACK_BACKEND_REQUIRED',message:'请将签名回调接入Broker服务端事务处理器'});
       if (url.pathname === '/livez') return json(res, 200, { status: 'alive', mode: 'broker' });
       if (url.pathname === '/readyz') { await broker.initialize(); return json(res, 200, { status: 'ready', mode: 'broker', protocol: 'tyhr-domain-port/1' }); }

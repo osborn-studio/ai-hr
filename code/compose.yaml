@@ -20,6 +20,7 @@ services:
       TYHR_INTEGRATION_VAULT_KEY: "${TYHR_INTEGRATION_VAULT_KEY:-}"
       TYHR_DATA_VAULT_KEY: "${TYHR_DATA_VAULT_KEY:-}"
       # Opt in only after reviewing and enabling the bounded WASM engine.
+      TYHR_SSO_ALLOWED_ORIGINS: "${TYHR_SSO_ALLOWED_ORIGINS:-}"
       TYHR_PAYROLL_SCRIPT_SANDBOX: "${TYHR_PAYROLL_SCRIPT_SANDBOX:-}"
     restart: unless-stopped
     healthcheck:
